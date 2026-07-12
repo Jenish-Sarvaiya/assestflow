@@ -20,7 +20,6 @@ export const LoginSignup: React.FC<LoginSignupProps> = ({ onSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
-  const [devResetLink, setDevResetLink] = useState<string | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -34,7 +33,6 @@ export const LoginSignup: React.FC<LoginSignupProps> = ({ onSuccess }) => {
   const resetMessages = () => {
     setError(null);
     setInfo(null);
-    setDevResetLink(null);
   };
 
   const switchMode = (nextMode: typeof mode) => {
@@ -59,9 +57,6 @@ export const LoginSignup: React.FC<LoginSignupProps> = ({ onSuccess }) => {
       } else if (mode === 'forgot') {
         const data = await api.post('/auth/forgot-password', { email });
         setInfo(data.message || 'Password reset link sent.');
-        if (data.devToken) {
-          setDevResetLink(`http://localhost:5173/?token=${data.devToken}`);
-        }
       } else if (mode === 'reset') {
         if (password !== confirmPassword) {
           throw new Error('Passwords do not match');
@@ -88,7 +83,7 @@ export const LoginSignup: React.FC<LoginSignupProps> = ({ onSuccess }) => {
   const subheading = {
     login: 'Sign in to manage assets, bookings, audits, and maintenance work.',
     signup: 'Register as an employee to start tracking assigned resources.',
-    forgot: 'Enter your email to receive a password reset token.',
+    forgot: 'Enter your email and we will send a secure password reset link.',
     reset: 'Set a new password for your AssetFlow account.',
   }[mode];
 
@@ -123,24 +118,6 @@ export const LoginSignup: React.FC<LoginSignupProps> = ({ onSuccess }) => {
         {info && (
           <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm rounded-lg text-center mb-6">
             {info}
-          </div>
-        )}
-
-        {devResetLink && (
-          <div className="p-4 bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-lg text-left space-y-2 mb-6">
-            <div className="font-bold uppercase tracking-wider text-[10px]">Hackathon Debug Info</div>
-            <p>Click below to simulate email link redirection:</p>
-            <a
-              href={devResetLink}
-              onClick={() => {
-                const token = devResetLink.split('token=')[1];
-                setResetToken(token);
-                setMode('reset');
-              }}
-              className="text-primary-700 hover:text-primary-600 hover:underline block break-all"
-            >
-              {devResetLink}
-            </a>
           </div>
         )}
 
@@ -193,7 +170,7 @@ export const LoginSignup: React.FC<LoginSignupProps> = ({ onSuccess }) => {
                 <input
                   type="text"
                   required
-                  placeholder="Token from terminal or dev banner"
+                  placeholder="Paste the reset token from your email"
                   value={resetToken}
                   onChange={(e) => setResetToken(e.target.value)}
                   className="w-full pl-11 pr-4 py-3 bg-white border border-slate-300 focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30 rounded-lg text-slate-950 outline-none text-sm transition-all placeholder:text-slate-400"

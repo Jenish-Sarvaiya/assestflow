@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { authenticateJWT } from '../middleware/auth';
 import { requireRole } from '../middleware/requireRole';
 import { upload } from '../middleware/upload';
+import { lockAssetForWorkflow } from '../services/assetWorkflow';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -66,6 +67,19 @@ router.post('/', authenticateJWT, upload.single('photo'), async (req, res) => {
     const body = raiseRequestSchema.parse(req.body);
 
     const ticket = await prisma.$transaction(async (tx) => {
+      if (!await lockAssetForWorkflow(tx, body.assetId)) {
+        throw { status: 404, message: 'Asset not found' };
+      }
+
+      if (actor.role === Role.EMPLOYEE) {
+        const heldAllocation = await tx.assetAllocation.findFirst({
+          where: { assetId: body.assetId, employeeId: actor.id, status: 'ACTIVE' }
+        });
+        if (!heldAllocation) {
+          throw { status: 403, message: 'Employees can only raise maintenance for assets allocated to them.' };
+        }
+      }
+
       // Create request
       const reqVal = await tx.maintenanceRequest.create({
         data: {
@@ -124,6 +138,9 @@ router.post('/', authenticateJWT, upload.single('photo'), async (req, res) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors[0].message });
     }
+    if (error?.status) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('Raise maintenance request error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -151,8 +168,17 @@ router.patch('/:id/approve', authenticateJWT, requireRole([Role.ASSET_MANAGER]),
       return res.status(400).json({ error: 'Request is not in PENDING state' });
     }
 
-    // Approve inside a transaction to flip Asset.status to UNDER_MAINTENANCE
+    // Approve inside a locked transaction to flip Asset.status to UNDER_MAINTENANCE.
     const result = await prisma.$transaction(async (tx) => {
+      if (!await lockAssetForWorkflow(tx, ticket.assetId)) {
+        throw { status: 404, message: 'Asset not found' };
+      }
+
+      const asset = await tx.asset.findUnique({ where: { id: ticket.assetId } });
+      if (!asset || (asset.status !== AssetStatus.AVAILABLE && asset.status !== AssetStatus.ALLOCATED)) {
+        throw { status: 409, message: 'Asset is not eligible to enter maintenance' };
+      }
+
       const updated = await tx.maintenanceRequest.update({
         where: { id },
         data: {
@@ -359,8 +385,12 @@ router.patch('/:id/resolve', authenticateJWT, requireRole([Role.ASSET_MANAGER]),
       return res.status(400).json({ error: 'Request is not currently IN_PROGRESS' });
     }
 
-    // Resolve inside a transaction to restore appropriate Asset.status
+    // Resolve inside a locked transaction to restore appropriate Asset.status.
     const result = await prisma.$transaction(async (tx) => {
+      if (!await lockAssetForWorkflow(tx, ticket.assetId)) {
+        throw { status: 404, message: 'Asset not found' };
+      }
+
       // 1. Mark request as RESOLVED
       const updated = await tx.maintenanceRequest.update({
         where: { id },

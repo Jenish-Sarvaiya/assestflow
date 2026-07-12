@@ -18,7 +18,12 @@ export const authenticateJWT = (req: Request, res: Response, next: NextFunction)
       return res.status(401).json({ error: 'Unauthorized: Access token missing' });
     }
 
-    jwt.verify(token, process.env.JWT_SECRET || 'assetflow-super-secret-key-hackathon-2026-very-long', (err, user) => {
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) {
+      return res.status(500).json({ error: 'Authentication is not configured' });
+    }
+
+    jwt.verify(token, jwtSecret, (err, user) => {
       if (err) {
         return res.status(403).json({ error: 'Forbidden: Invalid or expired token' });
       }

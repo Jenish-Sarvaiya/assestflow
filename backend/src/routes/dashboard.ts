@@ -21,6 +21,10 @@ router.get('/stats', authenticateJWT, async (req, res) => {
         lostAssets,
         activeAllocations,
         pendingMaintenance,
+        maintenanceToday,
+        pendingTransfers,
+        upcomingReturns,
+        overdueReturns,
         ongoingBookings
       ] = await Promise.all([
         prisma.asset.count({ where: { status: { notIn: [AssetStatus.RETIRED, AssetStatus.DISPOSED] } } }),
@@ -32,6 +36,22 @@ router.get('/stats', authenticateJWT, async (req, res) => {
         prisma.maintenanceRequest.count({
           where: {
             status: { in: [MaintenanceStatus.PENDING, MaintenanceStatus.APPROVED, MaintenanceStatus.TECHNICIAN_ASSIGNED, MaintenanceStatus.IN_PROGRESS] }
+          }
+        }),
+        prisma.maintenanceRequest.count({
+          where: { createdAt: { gte: new Date(now.getFullYear(), now.getMonth(), now.getDate()) } }
+        }),
+        prisma.transferRequest.count({ where: { status: 'REQUESTED' } }),
+        prisma.assetAllocation.count({
+          where: {
+            status: AllocationStatus.ACTIVE,
+            expectedReturnDate: { gte: now, lte: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000) }
+          }
+        }),
+        prisma.assetAllocation.count({
+          where: {
+            status: AllocationStatus.ACTIVE,
+            expectedReturnDate: { lt: now }
           }
         }),
         prisma.resourceBooking.count({
@@ -69,6 +89,10 @@ router.get('/stats', authenticateJWT, async (req, res) => {
           lostAssets,
           activeAllocations,
           pendingMaintenance,
+          maintenanceToday,
+          pendingTransfers,
+          upcomingReturns,
+          overdueReturns,
           ongoingBookings
         },
         categoryDistribution: categories.map(c => ({ name: c.name, count: c._count.assets })),

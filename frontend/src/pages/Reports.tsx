@@ -1,17 +1,28 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { api } from '../lib/api';
 import {
-  BarChart3,
-  Shuffle,
-  Wrench,
-  Clock,
-  CalendarCheck,
   AlertTriangle,
+  BarChart3,
+  CalendarDays,
+  Download,
+  PieChart as PieChartIcon,
   RefreshCw,
-  FolderSync,
-  Sparkles
+  Wrench,
 } from 'lucide-react';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Legend,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+import { api } from '../lib/api';
 
 interface UtilizationStat {
   id: number;
@@ -31,8 +42,20 @@ interface MaintenanceStat {
 }
 
 interface DueAlertsReport {
-  overdue: any[];
-  upcomingMaintenance: any[];
+  overdue: Array<{
+    id: number;
+    expectedReturnDate: string;
+    asset: { assetTag: string; name: string };
+    employee?: { name: string } | null;
+    department?: { name: string } | null;
+  }>;
+  upcomingMaintenance: Array<{
+    id: number;
+    assetTag: string;
+    name: string;
+    nextMaintenanceDueDate: string;
+    category: { name: string };
+  }>;
 }
 
 interface HeatmapReport {
@@ -40,364 +63,421 @@ interface HeatmapReport {
   hours: { timeSlot: string; count: number }[];
 }
 
-export const Reports: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'utilization' | 'maintenance' | 'alerts' | 'heatmap'>('utilization');
+interface AssetStatusStat {
+  status: string;
+  count: number;
+}
 
-  // Queries
-  const { data: utilization = [], isLoading: utilLoading } = useQuery<UtilizationStat[]>({
+interface DepartmentAllocationStat {
+  department: string;
+  count: number;
+}
+
+type ReportTab = 'overview' | 'utilization' | 'maintenance' | 'demand' | 'alerts';
+
+const chartColors = ['#ff5a1f', '#0f9e9a', '#2563eb', '#f59e0b', '#7c3aed', '#dc2626', '#64748b'];
+const tooltipStyle = {
+  border: '1px solid #dbe3eb',
+  borderRadius: '6px',
+  background: '#ffffff',
+  color: '#0f172a',
+  boxShadow: '0 8px 24px rgba(15, 23, 42, 0.08)',
+};
+
+const formatStatus = (value: string) => value
+  .replaceAll('_', ' ')
+  .toLowerCase()
+  .replace(/\b\w/g, char => char.toUpperCase());
+
+const formatHours = (minutes: number) => Math.round((minutes / 60) * 10) / 10;
+
+function exportCsv(filename: string, rows: Record<string, unknown>[]) {
+  if (!rows.length) return;
+
+  const headers = Object.keys(rows[0]);
+  const escape = (value: unknown) => '"' + String(value ?? '').replaceAll('"', '""') + '"';
+  const csv = [headers.join(','), ...rows.map(row => headers.map(header => escape(row[header])).join(','))].join('\n');
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+const LoadingState = () => (
+  <div className="flex items-center justify-center py-16 text-sm text-slate-500 gap-2">
+    <RefreshCw className="w-5 h-5 animate-spin text-primary-500" />
+    Preparing report data...
+  </div>
+);
+
+const EmptyState: React.FC<{ message: string }> = ({ message }) => (
+  <div className="border border-dashed border-slate-300 bg-slate-50 rounded-lg p-10 text-center text-sm text-slate-500">
+    {message}
+  </div>
+);
+
+export const Reports: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<ReportTab>('overview');
+
+  const { data: utilization = [], isLoading: utilizationLoading } = useQuery<UtilizationStat[]>({
     queryKey: ['report-utilization'],
     queryFn: () => api.get('/reports/utilization'),
   });
-
-  const { data: maintenance = [], isLoading: maintLoading } = useQuery<MaintenanceStat[]>({
+  const { data: maintenance = [], isLoading: maintenanceLoading } = useQuery<MaintenanceStat[]>({
     queryKey: ['report-maintenance'],
     queryFn: () => api.get('/reports/maintenance'),
   });
-
   const { data: alerts, isLoading: alertsLoading } = useQuery<DueAlertsReport>({
     queryKey: ['report-alerts'],
     queryFn: () => api.get('/reports/overdue-due'),
   });
-
-  const { data: heatmap, isLoading: heatmapLoading } = useQuery<HeatmapReport>({
+  const { data: heatmap, isLoading: demandLoading } = useQuery<HeatmapReport>({
     queryKey: ['report-heatmap'],
     queryFn: () => api.get('/reports/bookings-heatmap'),
   });
+  const { data: assetStatus = [], isLoading: statusLoading } = useQuery<AssetStatusStat[]>({
+    queryKey: ['report-asset-status'],
+    queryFn: () => api.get('/reports/asset-status-summary'),
+  });
+  const { data: allocationsByDepartment = [], isLoading: allocationsLoading } = useQuery<DepartmentAllocationStat[]>({
+    queryKey: ['report-allocations-by-department'],
+    queryFn: () => api.get('/reports/allocations-by-department'),
+  });
+
+  const utilizationChart = useMemo(
+    () => utilization.slice(0, 6).map(item => ({
+      name: item.tag,
+      hours: formatHours(item.totalMinutes),
+      bookings: item.frequency,
+    })),
+    [utilization]
+  );
+  const maintenanceChart = useMemo(
+    () => maintenance.slice(0, 6).map(item => ({
+      name: item.tag,
+      resolved: item.resolvedCount,
+      open: item.pendingCount,
+    })),
+    [maintenance]
+  );
+  const activeAssetCount = useMemo(
+    () => assetStatus
+      .filter(item => !['RETIRED', 'DISPOSED'].includes(item.status))
+      .reduce((total, item) => total + item.count, 0),
+    [assetStatus]
+  );
+  const openRepairs = useMemo(
+    () => maintenance.reduce((total, item) => total + item.pendingCount, 0),
+    [maintenance]
+  );
+  const totalBookings = useMemo(
+    () => utilization.reduce((total, item) => total + item.frequency, 0),
+    [utilization]
+  );
+
+  const exportCurrentView = () => {
+    if (activeTab === 'utilization') {
+      exportCsv('asset-utilization.csv', utilization.map(item => ({
+        tag: item.tag,
+        asset: item.name,
+        bookings: item.frequency,
+        hours: formatHours(item.totalMinutes),
+      })));
+      return;
+    }
+    if (activeTab === 'maintenance') {
+      exportCsv('maintenance-frequency.csv', maintenance.map(item => ({
+        tag: item.tag,
+        asset: item.name,
+        tickets: item.totalTickets,
+        resolved: item.resolvedCount,
+        open: item.pendingCount,
+      })));
+      return;
+    }
+    if (activeTab === 'demand') {
+      exportCsv('booking-demand.csv', [
+        ...(heatmap?.days || []).map(item => ({ dimension: item.dayName, bookings: item.count })),
+        ...(heatmap?.hours || []).map(item => ({ dimension: item.timeSlot, bookings: item.count })),
+      ]);
+      return;
+    }
+    if (activeTab === 'alerts') {
+      exportCsv('overdue-allocations.csv', (alerts?.overdue || []).map(item => ({
+        tag: item.asset.assetTag,
+        asset: item.asset.name,
+        holder: item.employee?.name || item.department?.name || 'Unassigned',
+        expectedReturn: new Date(item.expectedReturnDate).toLocaleDateString(),
+      })));
+      return;
+    }
+    exportCsv('assetflow-overview.csv', [
+      ...assetStatus.map(item => ({ group: 'Asset status', label: formatStatus(item.status), value: item.count })),
+      ...allocationsByDepartment.map(item => ({ group: 'Department allocation', label: item.department, value: item.count })),
+    ]);
+  };
+
+  const tabItems: Array<{ id: ReportTab; label: string }> = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'utilization', label: 'Utilization' },
+    { id: 'maintenance', label: 'Maintenance' },
+    { id: 'demand', label: 'Booking demand' },
+    { id: 'alerts', label: 'Exceptions' },
+  ];
 
   return (
-    <div className="space-y-6 text-white">
-      {/* HEADER SECTION */}
-      <div className="flex justify-between items-center">
+    <div className="space-y-6 text-slate-950">
+      <section className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h2 className="text-3xl font-extrabold tracking-tight text-white flex items-center space-x-2">
-            <BarChart3 className="w-8 h-8 text-sky-400" />
-            <span>Reports & Analytics</span>
-          </h2>
-          <p className="text-slate-400 text-sm mt-1">Review operational insights, utilization rankings, and preventive maintenance triggers.</p>
+          <div className="flex items-center gap-2 text-primary-700 text-xs font-bold uppercase tracking-[0.2em]">
+            <BarChart3 className="w-4 h-4" />
+            Analytics workspace
+          </div>
+          <h2 className="mt-2 text-3xl font-extrabold tracking-tight">Operational insights</h2>
+          <p className="mt-1 text-sm text-slate-600">Track capacity, repair risk, ownership, and booking demand from live records.</p>
         </div>
-      </div>
+        <button onClick={exportCurrentView} className="inline-flex items-center justify-center gap-2 px-3 py-2 text-xs font-bold text-slate-700 bg-white border border-slate-200 hover:border-primary-200 hover:bg-primary-50 rounded-lg transition">
+          <Download className="w-4 h-4" />
+          Export current view
+        </button>
+      </section>
 
-      {/* TABS SELECTOR */}
-      <div className="flex border-b border-slate-800 bg-slate-900/30 p-1 rounded-xl max-w-lg">
-        <button
-          onClick={() => setActiveTab('utilization')}
-          className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all outline-none cursor-pointer text-center ${
-            activeTab === 'utilization' ? 'bg-slate-800 text-white shadow border border-slate-700/30' : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          Utilization
-        </button>
-        <button
-          onClick={() => setActiveTab('maintenance')}
-          className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all outline-none cursor-pointer text-center ${
-            activeTab === 'maintenance' ? 'bg-slate-800 text-white shadow border border-slate-700/30' : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          Maintenance Rates
-        </button>
-        <button
-          onClick={() => setActiveTab('alerts')}
-          className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all outline-none cursor-pointer text-center ${
-            activeTab === 'alerts' ? 'bg-slate-800 text-white shadow border border-slate-700/30' : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          Due Alerts
-        </button>
-        <button
-          onClick={() => setActiveTab('heatmap')}
-          className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all outline-none cursor-pointer text-center ${
-            activeTab === 'heatmap' ? 'bg-slate-800 text-white shadow border border-slate-700/30' : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          Peak Hours
-        </button>
-      </div>
+      <nav className="flex gap-1 overflow-x-auto bg-white border border-slate-200 p-1 rounded-lg" aria-label="Analytics report tabs">
+        {tabItems.map(item => (
+          <button
+            key={item.id}
+            onClick={() => setActiveTab(item.id)}
+            className={'shrink-0 px-3 py-2 text-xs font-bold rounded-md transition ' + (activeTab === item.id ? 'bg-primary-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950')}
+          >
+            {item.label}
+          </button>
+        ))}
+      </nav>
 
-      {/* 1. RESOURCE UTILIZATION TAB */}
+      {activeTab === 'overview' && (
+        <div className="space-y-5">
+          <section className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {[
+              { label: 'Active assets', value: activeAssetCount, color: 'text-primary-700 bg-primary-50 border-primary-100' },
+              { label: 'Open repairs', value: openRepairs, color: 'text-amber-800 bg-amber-50 border-amber-100' },
+              { label: 'Recorded bookings', value: totalBookings, color: 'text-teal-800 bg-teal-50 border-teal-100' },
+              { label: 'Overdue returns', value: alerts?.overdue.length || 0, color: 'text-red-700 bg-red-50 border-red-100' },
+            ].map(card => (
+              <div key={card.label} className={'border rounded-lg p-4 ' + card.color}>
+                <p className="text-[10px] uppercase tracking-[0.16em] font-bold">{card.label}</p>
+                <p className="mt-2 text-3xl font-extrabold text-slate-950">{card.value}</p>
+              </div>
+            ))}
+          </section>
+
+          {(statusLoading || allocationsLoading) ? <LoadingState /> : (
+            <section className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+              <div className="bg-white border border-slate-200 rounded-lg p-5 min-h-[340px]">
+                <div className="flex items-center gap-2 mb-4">
+                  <PieChartIcon className="w-5 h-5 text-primary-600" />
+                  <div>
+                    <h3 className="font-bold">Asset lifecycle distribution</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">Inventory grouped by current lifecycle state.</p>
+                  </div>
+                </div>
+                {assetStatus.length === 0 ? <EmptyState message="Register assets to see lifecycle distribution." /> : (
+                  <ResponsiveContainer width="100%" height={250}>
+                    <PieChart>
+                      <Pie data={assetStatus} dataKey="count" nameKey="status" innerRadius={62} outerRadius={94} paddingAngle={3}>
+                        {assetStatus.map((item, index) => <Cell key={item.status} fill={chartColors[index % chartColors.length]} />)}
+                      </Pie>
+                      <Tooltip contentStyle={tooltipStyle} formatter={(value: number, name: string) => [value, formatStatus(name)]} />
+                      <Legend formatter={(value: string) => formatStatus(value)} wrapperStyle={{ fontSize: 12 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+
+              <div className="bg-white border border-slate-200 rounded-lg p-5 min-h-[340px]">
+                <div className="flex items-center gap-2 mb-4">
+                  <BarChart3 className="w-5 h-5 text-teal-700" />
+                  <div>
+                    <h3 className="font-bold">Allocated equipment by department</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">Current equipment ownership across teams.</p>
+                  </div>
+                </div>
+                {allocationsByDepartment.length === 0 ? <EmptyState message="Active allocations will appear here." /> : (
+                  <ResponsiveContainer width="100%" height={250}>
+                    <BarChart data={allocationsByDepartment.slice(0, 8)} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                      <XAxis dataKey="department" tick={{ fill: '#64748b', fontSize: 11 }} axisLine={false} tickLine={false} />
+                      <YAxis allowDecimals={false} tick={{ fill: '#64748b', fontSize: 11 }} axisLine={false} tickLine={false} />
+                      <Tooltip contentStyle={tooltipStyle} />
+                      <Bar dataKey="count" name="Allocated assets" fill="#0f9e9a" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+            </section>
+          )}
+        </div>
+      )}
+
       {activeTab === 'utilization' && (
-        <div className="space-y-4">
-          <div className="flex justify-between items-center">
-            <h3 className="text-lg font-bold text-slate-200">Shared Resource Utilization Rankings</h3>
-            <span className="text-[10px] text-slate-500 italic">Ranked by total hours booked</span>
-          </div>
-
-          {utilLoading ? (
-            <div className="flex justify-center items-center py-12 text-slate-400 text-sm space-x-2">
-              <RefreshCw className="w-5 h-5 animate-spin text-primary-400" />
-              <span>Fetching utilization data...</span>
-            </div>
-          ) : utilization.length === 0 ? (
-            <div className="glass p-12 rounded-2xl text-center text-slate-400 text-sm">
-              No booking records available to display rankings.
-            </div>
-          ) : (
-            <div className="glass rounded-xl overflow-hidden border border-slate-800/60">
-              <table className="w-full text-left text-sm text-slate-350">
-                <thead className="text-xs font-bold uppercase tracking-wider text-slate-400 bg-slate-900/80 border-b border-slate-800">
-                  <tr>
-                    <th className="px-6 py-4">Asset Tag</th>
-                    <th className="px-6 py-4">Asset Name</th>
-                    <th className="px-6 py-4">Total Reservations</th>
-                    <th className="px-6 py-4">Accumulated Hours</th>
-                    <th className="px-6 py-4">Utilization Score</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60">
-                  {utilization.map((item, idx) => {
-                    const totalHours = Math.round((item.totalMinutes / 60) * 10) / 10;
-                    const maxMinutes = Math.max(...utilization.map(i => i.totalMinutes)) || 1;
-                    const scorePercent = Math.min(100, Math.round((item.totalMinutes / maxMinutes) * 100));
-
-                    return (
-                      <tr key={item.id} className="hover:bg-slate-850/10 transition-colors">
-                        <td className="px-6 py-4 font-bold text-sky-400 text-xs">{item.tag}</td>
-                        <td className="px-6 py-4 font-semibold text-white">{item.name}</td>
-                        <td className="px-6 py-4 text-slate-300 font-semibold">{item.frequency} slots</td>
-                        <td className="px-6 py-4 text-slate-200">{totalHours} hrs</td>
-                        <td className="px-6 py-4">
-                          <div className="flex items-center space-x-3">
-                            <div className="w-36 h-2 bg-slate-950 rounded-full overflow-hidden border border-slate-900">
-                              <div
-                                className="h-full bg-gradient-to-r from-sky-400 to-indigo-500 rounded-full"
-                                style={{ width: `${scorePercent}%` }}
-                              ></div>
-                            </div>
-                            <span className="text-xs font-bold text-sky-400">{scorePercent}%</span>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+        <div className="space-y-5">
+          {utilizationLoading ? <LoadingState /> : utilization.length === 0 ? <EmptyState message="Booking history will create utilization rankings." /> : (
+            <>
+              <section className="bg-white border border-slate-200 rounded-lg p-5">
+                <h3 className="font-bold">Most-used shared resources</h3>
+                <p className="text-xs text-slate-500 mt-1">Total booked hours across completed and upcoming reservations.</p>
+                <div className="mt-4 h-72">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={utilizationChart} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                      <XAxis dataKey="name" tick={{ fill: '#64748b', fontSize: 11 }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fill: '#64748b', fontSize: 11 }} axisLine={false} tickLine={false} />
+                      <Tooltip contentStyle={tooltipStyle} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      <Bar dataKey="hours" name="Booked hours" fill="#ff5a1f" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="bookings" name="Reservations" fill="#2563eb" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </section>
+              <DataTable
+                headers={['Asset', 'Reservations', 'Booked hours']}
+                rows={utilization.map(item => [
+                  <span key={item.id} className="font-mono font-bold text-primary-700">{item.tag} <span className="font-sans font-semibold text-slate-950">{item.name}</span></span>,
+                  String(item.frequency) + ' slots',
+                  String(formatHours(item.totalMinutes)) + ' hrs',
+                ])}
+              />
+            </>
           )}
         </div>
       )}
 
-      {/* 2. MAINTENANCE FREQUENCY RATES TAB */}
       {activeTab === 'maintenance' && (
-        <div className="space-y-4">
-          <div className="flex justify-between items-center">
-            <h3 className="text-lg font-bold text-slate-200">Equipment Failures & Repeat Repair Rates</h3>
-            <span className="text-[10px] text-slate-500 italic">Helps identify obsolete hardware in need of replacement</span>
-          </div>
-
-          {maintLoading ? (
-            <div className="flex justify-center items-center py-12 text-slate-400 text-sm space-x-2">
-              <RefreshCw className="w-5 h-5 animate-spin text-primary-400" />
-              <span>Fetching maintenance history...</span>
-            </div>
-          ) : maintenance.length === 0 ? (
-            <div className="glass p-12 rounded-2xl text-center text-slate-400 text-sm">
-              No maintenance logs recorded.
-            </div>
-          ) : (
-            <div className="glass rounded-xl overflow-hidden border border-slate-800/60">
-              <table className="w-full text-left text-sm text-slate-355">
-                <thead className="text-xs font-bold uppercase tracking-wider text-slate-400 bg-slate-900/80 border-b border-slate-800">
-                  <tr>
-                    <th className="px-6 py-4">Asset Tag</th>
-                    <th className="px-6 py-4">Asset Name</th>
-                    <th className="px-6 py-4">Total Repair Tickets</th>
-                    <th className="px-6 py-4">Resolved SLA</th>
-                    <th className="px-6 py-4">Status Warnings</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60">
-                  {maintenance.map((item) => (
-                    <tr key={item.id} className="hover:bg-slate-850/10 transition-colors">
-                      <td className="px-6 py-4 font-bold text-sky-400 text-xs">{item.tag}</td>
-                      <td className="px-6 py-4 font-semibold text-white">{item.name}</td>
-                      <td className="px-6 py-4 text-slate-300 font-bold">{item.totalTickets} runs</td>
-                      <td className="px-6 py-4 text-emerald-400 font-semibold">{item.resolvedCount} closed</td>
-                      <td className="px-6 py-4">
-                        {item.totalTickets >= 3 ? (
-                          <span className="flex items-center space-x-1 text-red-400 text-[10px] font-extrabold uppercase tracking-wider bg-red-500/10 px-2 py-0.5 rounded border border-red-500/20 max-w-[140px] justify-center animate-pulse">
-                            <AlertTriangle className="w-3.5 h-3.5" />
-                            <span>Repeat Failure</span>
-                          </span>
-                        ) : (
-                          <span className="text-slate-500 text-xs">Standard rate</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+        <div className="space-y-5">
+          {maintenanceLoading ? <LoadingState /> : maintenance.length === 0 ? <EmptyState message="Maintenance requests will reveal repair frequency and repeat failures." /> : (
+            <>
+              <section className="bg-white border border-slate-200 rounded-lg p-5">
+                <div className="flex items-center gap-2"><Wrench className="w-5 h-5 text-amber-600" /><h3 className="font-bold">Repair workload by asset</h3></div>
+                <p className="text-xs text-slate-500 mt-1">Compare resolved work against open repair orders.</p>
+                <div className="mt-4 h-72">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={maintenanceChart} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                      <XAxis dataKey="name" tick={{ fill: '#64748b', fontSize: 11 }} axisLine={false} tickLine={false} />
+                      <YAxis allowDecimals={false} tick={{ fill: '#64748b', fontSize: 11 }} axisLine={false} tickLine={false} />
+                      <Tooltip contentStyle={tooltipStyle} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      <Bar dataKey="resolved" name="Resolved" stackId="repairs" fill="#0f9e9a" />
+                      <Bar dataKey="open" name="Open" stackId="repairs" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </section>
+              <DataTable
+                headers={['Asset', 'Tickets', 'Resolved', 'Open']}
+                rows={maintenance.map(item => [
+                  <span key={item.id} className="font-mono font-bold text-primary-700">{item.tag} <span className="font-sans font-semibold text-slate-950">{item.name}</span></span>,
+                  item.totalTickets,
+                  <span key="resolved" className="font-semibold text-teal-700">{item.resolvedCount}</span>,
+                  <span key="open" className={item.pendingCount ? 'font-semibold text-amber-700' : 'text-slate-500'}>{item.pendingCount}</span>,
+                ])}
+              />
+            </>
           )}
         </div>
       )}
 
-      {/* 3. DUE ALERTS (OVERDUE & PREVENTIVE SCHEDULE) */}
-      {activeTab === 'alerts' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Overdue Returns Panel */}
-          <div className="space-y-4">
-            <h3 className="text-base font-bold text-slate-200 flex items-center space-x-2">
-              <AlertTriangle className="w-4.5 h-4.5 text-red-400" />
-              <span>Overdue Allocations Sweep</span>
-            </h3>
-
-            {alertsLoading ? (
-              <div className="flex justify-center items-center py-12 text-slate-400 text-sm">
-                <span>Checking overdue logs...</span>
-              </div>
-            ) : !alerts || alerts.overdue.length === 0 ? (
-              <div className="glass p-8 rounded-2xl text-center text-slate-400 text-xs border border-slate-800/60">
-                All allocations are on track! No overdue devices.
-              </div>
-            ) : (
-              <div className="glass rounded-xl overflow-hidden border border-slate-800/60">
-                <table className="w-full text-left text-xs text-slate-350">
-                  <thead className="font-bold uppercase tracking-wider text-slate-400 bg-slate-900/80 border-b border-slate-800">
-                    <tr>
-                      <th className="px-4 py-3">Tag</th>
-                      <th className="px-4 py-3">Asset</th>
-                      <th className="px-4 py-3">Assigned To</th>
-                      <th className="px-4 py-3">Expected Date</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/60">
-                    {alerts.overdue.map((item) => (
-                      <tr key={item.id} className="hover:bg-slate-850/15">
-                        <td className="px-4 py-3 font-bold text-sky-400 font-mono">{item.asset.assetTag}</td>
-                        <td className="px-4 py-3 font-semibold text-white">{item.asset.name}</td>
-                        <td className="px-4 py-3">
-                          {item.employee ? item.employee.name : item.department?.name || 'Dept'}
-                        </td>
-                        <td className="px-4 py-3 text-red-400 font-semibold">
-                          {new Date(item.expectedReturnDate).toLocaleDateString()}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          {/* Upcoming Preventive Maintenance schedule */}
-          <div className="space-y-4">
-            <h3 className="text-base font-bold text-slate-200 flex items-center space-x-2">
-              <CalendarCheck className="w-4.5 h-4.5 text-primary-400" />
-              <span>Preventive Maintenance Due (30 Days)</span>
-            </h3>
-
-            {alertsLoading ? (
-              <div className="flex justify-center items-center py-12 text-slate-400 text-sm">
-                <span>Checking scheduler dates...</span>
-              </div>
-            ) : !alerts || alerts.upcomingMaintenance.length === 0 ? (
-              <div className="glass p-8 rounded-2xl text-center text-slate-400 text-xs border border-slate-800/60">
-                No preventive maintenance due in the next 30 days.
-              </div>
-            ) : (
-              <div className="glass rounded-xl overflow-hidden border border-slate-800/60">
-                <table className="w-full text-left text-xs text-slate-350">
-                  <thead className="font-bold uppercase tracking-wider text-slate-400 bg-slate-900/80 border-b border-slate-800">
-                    <tr>
-                      <th className="px-4 py-3">Tag</th>
-                      <th className="px-4 py-3">Asset</th>
-                      <th className="px-4 py-3">Location</th>
-                      <th className="px-4 py-3">Service Date</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/60">
-                    {alerts.upcomingMaintenance.map((item) => (
-                      <tr key={item.id} className="hover:bg-slate-850/15">
-                        <td className="px-4 py-3 font-bold text-sky-400 font-mono">{item.assetTag}</td>
-                        <td className="px-4 py-3 font-semibold text-white">{item.name}</td>
-                        <td className="px-4 py-3">{item.location ? item.location.name : 'Main Office'}</td>
-                        <td className="px-4 py-3 text-sky-400 font-semibold">
-                          {new Date(item.nextMaintenanceDueDate).toLocaleDateString()}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+      {activeTab === 'demand' && (
+        <div className="space-y-5">
+          {demandLoading ? <LoadingState /> : !heatmap ? <EmptyState message="Booking data is not available yet." /> : (
+            <section className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+              <DemandChart title="Booking demand by day" description="Find the days that need more resource capacity." data={heatmap.days} color="#2563eb" />
+              <DemandChart title="Booking demand by time window" description="Understand when shared assets see peak demand." data={heatmap.hours} color="#7c3aed" />
+            </section>
+          )}
         </div>
       )}
 
-      {/* 4. BOOKINGS HEATMAP VIEW */}
-      {activeTab === 'heatmap' && (
-        <div className="space-y-6">
-          <div className="flex justify-between items-center">
-            <h3 className="text-lg font-bold text-slate-200">Peak Reservation Density Timelines</h3>
-            <span className="text-[10px] text-slate-550 italic">Highlights day-of-week and hourly slot capacities</span>
-          </div>
-
-          {heatmapLoading ? (
-            <div className="flex justify-center items-center py-12 text-slate-400 text-sm space-x-2">
-              <RefreshCw className="w-5 h-5 animate-spin text-primary-400" />
-              <span>Calculating heatmap profiles...</span>
-            </div>
-          ) : !heatmap ? (
-            <div className="glass p-12 rounded-2xl text-center text-slate-400 text-sm">
-              No booking schedules logged to calculate peak logs.
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Peak Weekdays */}
-              <div className="glass rounded-xl p-5 border border-slate-800 space-y-4">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Peak Weekdays Density</h4>
-                <div className="space-y-3.5">
-                  {heatmap.days.map((d, index) => {
-                    const maxCount = Math.max(...heatmap.days.map(d => d.count)) || 1;
-                    const percent = Math.round((d.count / maxCount) * 100);
-                    return (
-                      <div key={index} className="space-y-1">
-                        <div className="flex justify-between text-xs">
-                          <span className="font-semibold text-slate-300">{d.dayName}</span>
-                          <span className="text-slate-450">{d.count} reservations</span>
-                        </div>
-                        <div className="w-full h-1.5 bg-slate-950 rounded-full overflow-hidden border border-slate-900">
-                          <div
-                            className="h-full bg-gradient-to-r from-sky-400 to-indigo-500 rounded-full"
-                            style={{ width: `${percent}%` }}
-                          ></div>
-                        </div>
-                      </div>
-                    );
-                  })}
+      {activeTab === 'alerts' && (
+        <div className="space-y-5">
+          {alertsLoading ? <LoadingState /> : (
+            <section className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+              <div className="bg-white border border-red-100 rounded-lg overflow-hidden">
+                <div className="p-5 border-b border-red-100 bg-red-50">
+                  <div className="flex items-center gap-2"><AlertTriangle className="w-5 h-5 text-red-600" /><h3 className="font-bold text-red-900">Overdue returns</h3></div>
+                  <p className="text-xs text-red-700 mt-1">Assets past their expected return date need follow-up.</p>
                 </div>
+                {(alerts?.overdue.length || 0) === 0 ? <EmptyState message="No overdue assets right now." /> : (
+                  <DataTable compact headers={['Asset', 'Holder', 'Expected return']} rows={(alerts?.overdue || []).map(item => [
+                    <span key={item.id} className="font-semibold">{item.asset.assetTag} <span className="text-slate-500">{item.asset.name}</span></span>,
+                    item.employee?.name || item.department?.name || 'Unassigned',
+                    new Date(item.expectedReturnDate).toLocaleDateString(),
+                  ])} />
+                )}
               </div>
-
-              {/* Peak Time Slots */}
-              <div className="glass rounded-xl p-5 border border-slate-800 space-y-4">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Peak Hour Slots Density</h4>
-                <div className="space-y-3.5">
-                  {heatmap.hours.map((h, index) => {
-                    const maxCount = Math.max(...heatmap.hours.map(h => h.count)) || 1;
-                    const percent = Math.round((h.count / maxCount) * 100);
-                    return (
-                      <div key={index} className="space-y-1">
-                        <div className="flex justify-between text-xs">
-                          <span className="font-semibold text-slate-300">
-                            {h.timeSlot} {h.timeSlot === 'Morning' ? '(6am - 12pm)' : h.timeSlot === 'Afternoon' ? '(12pm - 6pm)' : h.timeSlot === 'Evening' ? '(6pm - 12am)' : '(12am - 6am)'}
-                          </span>
-                          <span className="text-slate-450">{h.count} slots</span>
-                        </div>
-                        <div className="w-full h-1.5 bg-slate-950 rounded-full overflow-hidden border border-slate-900">
-                          <div
-                            className="h-full bg-gradient-to-r from-primary-400 to-indigo-500 rounded-full"
-                            style={{ width: `${percent}%` }}
-                          ></div>
-                        </div>
-                      </div>
-                    );
-                  })}
+              <div className="bg-white border border-amber-100 rounded-lg overflow-hidden">
+                <div className="p-5 border-b border-amber-100 bg-amber-50">
+                  <div className="flex items-center gap-2"><CalendarDays className="w-5 h-5 text-amber-700" /><h3 className="font-bold text-amber-950">Maintenance due soon</h3></div>
+                  <p className="text-xs text-amber-800 mt-1">Preventive work scheduled in the next 30 days.</p>
                 </div>
+                {(alerts?.upcomingMaintenance.length || 0) === 0 ? <EmptyState message="No scheduled maintenance is due in the next 30 days." /> : (
+                  <DataTable compact headers={['Asset', 'Category', 'Due date']} rows={(alerts?.upcomingMaintenance || []).map(item => [
+                    <span key={item.id} className="font-semibold">{item.assetTag} <span className="text-slate-500">{item.name}</span></span>,
+                    item.category.name,
+                    new Date(item.nextMaintenanceDueDate).toLocaleDateString(),
+                  ])} />
+                )}
               </div>
-            </div>
+            </section>
           )}
         </div>
       )}
     </div>
   );
 };
+
+const DemandChart: React.FC<{
+  title: string;
+  description: string;
+  data: { dayName?: string; timeSlot?: string; count: number }[];
+  color: string;
+}> = ({ title, description, data, color }) => (
+  <div className="bg-white border border-slate-200 rounded-lg p-5 min-h-[340px]">
+    <h3 className="font-bold">{title}</h3>
+    <p className="text-xs text-slate-500 mt-1">{description}</p>
+    {data.length === 0 ? <div className="mt-5"><EmptyState message="No booking activity recorded." /></div> : (
+      <div className="mt-4 h-64">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={data.map(item => ({ label: item.dayName || item.timeSlot || '', count: item.count }))} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+            <XAxis dataKey="label" tick={{ fill: '#64748b', fontSize: 11 }} axisLine={false} tickLine={false} />
+            <YAxis allowDecimals={false} tick={{ fill: '#64748b', fontSize: 11 }} axisLine={false} tickLine={false} />
+            <Tooltip contentStyle={tooltipStyle} />
+            <Bar dataKey="count" name="Bookings" fill={color} radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    )}
+  </div>
+);
+
+const DataTable: React.FC<{ headers: string[]; rows: React.ReactNode[][]; compact?: boolean }> = ({ headers, rows, compact = false }) => (
+  <div className="bg-white border border-slate-200 rounded-lg overflow-x-auto">
+    <table className="w-full text-left text-sm">
+      <thead className="bg-slate-50 border-b border-slate-200 text-[10px] uppercase tracking-[0.14em] text-slate-500">
+        <tr>{headers.map(header => <th key={header} className="px-4 py-3 font-bold whitespace-nowrap">{header}</th>)}</tr>
+      </thead>
+      <tbody className="divide-y divide-slate-100 text-slate-700">
+        {rows.map((row, rowIndex) => (
+          <tr key={rowIndex} className="hover:bg-slate-50">
+            {row.map((cell, cellIndex) => <td key={cellIndex} className={(compact ? 'px-4 py-3' : 'px-4 py-4') + ' whitespace-nowrap'}>{cell}</td>)}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+);
+
 export default Reports;

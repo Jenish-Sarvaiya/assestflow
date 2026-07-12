@@ -17,6 +17,10 @@ import {
   FolderTree
 } from 'lucide-react';
 
+interface DashboardProps {
+  onNavigate: (screen: string) => void;
+}
+
 interface DashboardData {
   role: string;
   departmentName?: string;
@@ -54,7 +58,7 @@ const getMetricCards = (role: string, stats: any): MetricCard[] => {
         iconColor: 'text-primary-600',
         detail: (
           <span>
-            <strong className="text-emerald-700">{stats.availableAssets || 0}</strong> available · {stats.allocatedAssets || 0} allocated
+            <strong className="text-emerald-700">{stats.availableAssets || 0}</strong> available / {stats.allocatedAssets || 0} allocated
           </span>
         ),
       },
@@ -67,14 +71,14 @@ const getMetricCards = (role: string, stats: any): MetricCard[] => {
         detail: <span>Direct user assigns</span>,
       },
       {
-        label: 'Pending Maintenance',
-        value: stats.pendingMaintenance || 0,
+        label: 'Maintenance Today',
+        value: stats.maintenanceToday || 0,
         icon: Wrench,
         accent: 'border-l-amber-500',
         iconColor: 'text-amber-600',
         detail: (
           <span>
-            <strong className="text-red-600">{stats.lostAssets || 0}</strong> reported lost
+            <strong className="text-amber-700">{stats.pendingMaintenance || 0}</strong> repair orders open
           </span>
         ),
       },
@@ -162,7 +166,7 @@ const getMetricCards = (role: string, stats: any): MetricCard[] => {
   ];
 };
 
-export const Dashboard: React.FC = () => {
+export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   const { employee } = useAuthStore();
 
   const { data: dashboardData, isLoading } = useQuery<DashboardData>({
@@ -225,6 +229,37 @@ export const Dashboard: React.FC = () => {
             </div>
           );
         })}
+      </section>
+
+      {(role === 'ADMIN' || role === 'ASSET_MANAGER') && (
+        <section className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <button onClick={() => onNavigate('allocations')} className="text-left bg-primary-50 border border-primary-100 rounded-lg px-4 py-3 hover:bg-primary-100 transition">
+            <span className="block text-[10px] uppercase tracking-[0.18em] text-primary-700 font-bold">Pending transfers</span>
+            <span className="block mt-1 text-2xl font-extrabold text-slate-950">{stats.pendingTransfers || 0}</span>
+          </button>
+          <button onClick={() => onNavigate('allocations')} className="text-left bg-amber-50 border border-amber-100 rounded-lg px-4 py-3 hover:bg-amber-100 transition">
+            <span className="block text-[10px] uppercase tracking-[0.18em] text-amber-800 font-bold">Returns due this week</span>
+            <span className="block mt-1 text-2xl font-extrabold text-slate-950">{stats.upcomingReturns || 0}</span>
+          </button>
+          <button onClick={() => onNavigate('reports')} className="text-left bg-red-50 border border-red-100 rounded-lg px-4 py-3 hover:bg-red-100 transition">
+            <span className="block text-[10px] uppercase tracking-[0.18em] text-red-700 font-bold">Overdue returns</span>
+            <span className="block mt-1 text-2xl font-extrabold text-slate-950">{stats.overdueReturns || 0}</span>
+          </button>
+        </section>
+      )}
+
+      <section className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h3 className="font-bold text-slate-950">Quick actions</h3>
+            <p className="text-xs text-slate-500 mt-0.5">Move directly into the operational work that needs attention.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {role === 'ASSET_MANAGER' && <button onClick={() => onNavigate('assets')} className="px-3 py-2 text-xs font-bold text-primary-700 bg-primary-50 hover:bg-primary-100 border border-primary-100 rounded-lg transition">Register asset</button>}
+            <button onClick={() => onNavigate('bookings')} className="px-3 py-2 text-xs font-bold text-teal-700 bg-teal-50 hover:bg-teal-100 border border-teal-100 rounded-lg transition">Book resource</button>
+            <button onClick={() => onNavigate('maintenance')} className="px-3 py-2 text-xs font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-100 rounded-lg transition">Raise maintenance request</button>
+          </div>
+        </div>
       </section>
 
       <section className="grid grid-cols-1 lg:grid-cols-5 gap-5">
@@ -304,7 +339,7 @@ export const Dashboard: React.FC = () => {
             <p className="text-slate-500 text-sm">Quick shortcuts to request transfers, book equipment, or report defects.</p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-              <button className="p-4 bg-slate-50 hover:bg-primary-50 rounded-lg border border-slate-200 hover:border-primary-200 transition cursor-pointer flex justify-between items-center group text-left">
+              <button onClick={() => onNavigate('bookings')} className="p-4 bg-slate-50 hover:bg-primary-50 rounded-lg border border-slate-200 hover:border-primary-200 transition cursor-pointer flex justify-between items-center group text-left">
                 <span>
                   <span className="font-bold text-slate-950 text-sm block">Book Room / Projector</span>
                   <span className="text-xs text-slate-500 block mt-1">Reserve shared spaces</span>
@@ -312,7 +347,7 @@ export const Dashboard: React.FC = () => {
                 <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-primary-600 group-hover:translate-x-1 transition-all" />
               </button>
 
-              <button className="p-4 bg-slate-50 hover:bg-primary-50 rounded-lg border border-slate-200 hover:border-primary-200 transition cursor-pointer flex justify-between items-center group text-left">
+              <button onClick={() => onNavigate('maintenance')} className="p-4 bg-slate-50 hover:bg-primary-50 rounded-lg border border-slate-200 hover:border-primary-200 transition cursor-pointer flex justify-between items-center group text-left">
                 <span>
                   <span className="font-bold text-slate-950 text-sm block">Report Damage</span>
                   <span className="text-xs text-slate-500 block mt-1">File repair service request</span>

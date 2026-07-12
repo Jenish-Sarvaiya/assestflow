@@ -1,17 +1,21 @@
 import { Router } from 'express';
 import bcrypt from 'bcrypt';
+import crypto from 'crypto';
+import dotenv from 'dotenv';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { PrismaClient, Role, ActiveStatus } from '@prisma/client';
 import { authenticateJWT } from '../middleware/auth';
 
+dotenv.config();
+
 const router = Router();
 const prisma = new PrismaClient();
+const JWT_SECRET = process.env.JWT_SECRET;
 
-const JWT_SECRET = process.env.JWT_SECRET || 'assetflow-super-secret-key-hackathon-2026-very-long';
-
-// In-memory store for password reset tokens (temporary for hackathon)
-const resetTokens = new Map<string, { email: string; expiresAt: number }>();
+if (!JWT_SECRET) {
+  throw new Error('JWT_SECRET must be configured before starting AssetFlow.');
+}
 
 // Zod schemas
 const signupSchema = z.object({
@@ -175,30 +179,22 @@ router.post('/forgot-password', async (req, res) => {
       where: { email: body.email }
     });
 
+    const message = 'If the email exists, a reset link has been sent.';
     if (!employee) {
-      // Avoid revealing user exists/doesn't exist for security, but during demo we can log to console
-      console.log(`Password reset requested for non-existent email: ${body.email}`);
-      return res.json({ message: 'If the email exists, a reset link has been generated.' });
+      return res.json({ message });
     }
 
-    // Generate a simple token
-    const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-    const expiresAt = Date.now() + 3600000; // 1 hour expiry
+    const token = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
 
-    resetTokens.set(token, { email: body.email, expiresAt });
-
-    // HACKATHON DEMO: Log token reset details to system console for verification
-    console.log('\n--- PASSWORD RESET SIMULATION ---');
-    console.log(`Employee: ${employee.name} (${employee.email})`);
-    console.log(`Reset Token: ${token}`);
-    console.log(`Reset link: http://localhost:5173/reset-password?token=${token}`);
-    console.log('---------------------------------\n');
-
-    res.json({
-      message: 'If the email exists, a reset link has been generated.',
-      // Return token in response purely for testing and demo speed, so the user/tests don't have to scan logs
-      devToken: token
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`DELETE FROM PasswordResetToken WHERE employeeId = ${employee.id}`;
+      await tx.$executeRaw`INSERT INTO PasswordResetToken (tokenHash, employeeId, expiresAt) VALUES (${tokenHash}, ${employee.id}, ${expiresAt})`;
     });
+
+    // Hand the raw token to the configured email provider here. It is never logged or returned by this API.
+    res.json({ message });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors[0].message });
@@ -213,41 +209,33 @@ router.post('/reset-password', async (req, res) => {
   try {
     const body = resetPasswordSchema.parse(req.body);
 
-    const tokenData = resetTokens.get(body.token);
+    const tokenHash = crypto.createHash('sha256').update(body.token).digest('hex');
+    const tokens = await prisma.$queryRaw<Array<{ id: number; employeeId: number; expiresAt: Date }>>`SELECT id, employeeId, expiresAt FROM PasswordResetToken WHERE tokenHash = ${tokenHash} LIMIT 1`;
+    const resetToken = tokens[0];
 
-    if (!tokenData) {
-      return res.status(400).json({ error: 'Invalid reset token' });
-    }
-
-    if (Date.now() > tokenData.expiresAt) {
-      resetTokens.delete(body.token);
-      return res.status(400).json({ error: 'Reset token has expired' });
-    }
-
-    const employee = await prisma.employee.findUnique({
-      where: { email: tokenData.email }
-    });
-
-    if (!employee) {
-      return res.status(404).json({ error: 'Employee not found' });
+    if (!resetToken || resetToken.expiresAt <= new Date()) {
+      if (resetToken) {
+        await prisma.$executeRaw`DELETE FROM PasswordResetToken WHERE id = ${resetToken.id}`;
+      }
+      return res.status(400).json({ error: 'Invalid or expired reset token' });
     }
 
     const newPasswordHash = await bcrypt.hash(body.password, 10);
 
-    await prisma.employee.update({
-      where: { id: employee.id },
-      data: { passwordHash: newPasswordHash }
-    });
-
-    resetTokens.delete(body.token);
-
-    await prisma.activityLog.create({
-      data: {
-        actorId: employee.id,
-        action: 'PASSWORD_RESET',
-        entityType: 'Employee',
-        entityId: employee.id
-      }
+    await prisma.$transaction(async (tx) => {
+      await tx.employee.update({
+        where: { id: resetToken.employeeId },
+        data: { passwordHash: newPasswordHash }
+      });
+      await tx.$executeRaw`DELETE FROM PasswordResetToken WHERE employeeId = ${resetToken.employeeId}`;
+      await tx.activityLog.create({
+        data: {
+          actorId: resetToken.employeeId,
+          action: 'PASSWORD_RESET',
+          entityType: 'Employee',
+          entityId: resetToken.employeeId
+        }
+      });
     });
 
     res.json({ message: 'Password reset successfully' });

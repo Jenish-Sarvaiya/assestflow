@@ -24,7 +24,13 @@ const auditItemSchema = z.object({
 // GET /api/audit-cycles (authenticated read list)
 router.get('/audit-cycles', authenticateJWT, async (req, res) => {
   try {
+    const actor = (req as any).user;
+    const where = [Role.ADMIN, Role.ASSET_MANAGER].includes(actor.role)
+      ? {}
+      : { auditors: { some: { employeeId: actor.id } } };
+
     const cycles = await prisma.auditCycle.findMany({
+      where,
       include: {
         scopeDepartment: { select: { id: true, name: true } },
         scopeLocation: { select: { id: true, name: true } },
@@ -47,6 +53,7 @@ router.get('/audit-cycles', authenticateJWT, async (req, res) => {
 // GET /api/audit-cycles/:id (authenticated read detail)
 router.get('/audit-cycles/:id', authenticateJWT, async (req, res) => {
   try {
+    const actor = (req as any).user;
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
       return res.status(400).json({ error: 'Invalid cycle ID' });
@@ -79,6 +86,12 @@ router.get('/audit-cycles/:id', authenticateJWT, async (req, res) => {
 
     if (!cycle) {
       return res.status(404).json({ error: 'Audit cycle not found' });
+    }
+
+    const canReadCycle = [Role.ADMIN, Role.ASSET_MANAGER].includes(actor.role)
+      || cycle.auditors.some(a => a.employee.id === actor.id);
+    if (!canReadCycle) {
+      return res.status(403).json({ error: 'Forbidden: You are not assigned to this audit cycle.' });
     }
 
     // Compute discrepancy count summary dynamically

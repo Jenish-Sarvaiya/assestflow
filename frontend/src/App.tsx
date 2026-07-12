@@ -12,7 +12,7 @@ import { Allocations } from './pages/Allocations';
 import { Bookings } from './pages/Bookings';
 import { Maintenance } from './pages/Maintenance';
 import { Audits } from './pages/Audits';
-import { Reports } from './pages/Reports';
+const Reports = React.lazy(() => import('./pages/Reports'));
 import { ActivityLogs } from './pages/ActivityLogs';
 
 import {
@@ -31,6 +31,13 @@ import {
   X
 } from 'lucide-react';
 
+const screenIds = ['dashboard', 'org-setup', 'assets', 'allocations', 'bookings', 'maintenance', 'audits', 'reports', 'logs'];
+
+const getScreenFromHash = () => {
+  const screen = window.location.hash.slice(1);
+  return screenIds.includes(screen) ? screen : 'dashboard';
+};
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -42,7 +49,7 @@ const queryClient = new QueryClient({
 
 function AppContent() {
   const { isAuthenticated, employee, isLoading, checkAuth, clearSession } = useAuthStore();
-  const [currentScreen, setCurrentScreen] = useState<string>('dashboard');
+  const [currentScreen, setCurrentScreen] = useState<string>(getScreenFromHash);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const queryClient = useQueryClient();
@@ -74,6 +81,18 @@ function AppContent() {
     checkAuth();
   }, [checkAuth]);
 
+  useEffect(() => {
+    const syncScreenFromHash = () => setCurrentScreen(getScreenFromHash());
+    window.addEventListener('hashchange', syncScreenFromHash);
+    return () => window.removeEventListener('hashchange', syncScreenFromHash);
+  }, []);
+
+  const navigateTo = (screen: string) => {
+    const destination = screenIds.includes(screen) ? screen : 'dashboard';
+    setCurrentScreen(destination);
+    window.location.hash = destination;
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen session-shell flex flex-col items-center justify-center space-y-4">
@@ -104,7 +123,7 @@ function AppContent() {
   const renderActiveScreen = () => {
     switch (currentScreen) {
       case 'dashboard':
-        return <Dashboard />;
+        return <Dashboard onNavigate={navigateTo} />;
       case 'org-setup':
         return (
           <ProtectedRoute allowedRoles={['ADMIN']}>
@@ -123,9 +142,11 @@ function AppContent() {
         return <Audits />;
       case 'reports':
         return (
-          <ProtectedRoute allowedRoles={['ADMIN', 'ASSET_MANAGER', 'DEPARTMENT_HEAD']}>
-            <Reports />
-          </ProtectedRoute>
+          <React.Suspense fallback={<div className="py-20 text-center text-sm text-slate-500">Loading analytics...</div>}>
+            <ProtectedRoute allowedRoles={['ADMIN', 'ASSET_MANAGER', 'DEPARTMENT_HEAD']}>
+              <Reports />
+            </ProtectedRoute>
+          </React.Suspense>
         );
       case 'logs':
         return (
@@ -134,7 +155,7 @@ function AppContent() {
           </ProtectedRoute>
         );
       default:
-        return <Dashboard />;
+        return <Dashboard onNavigate={navigateTo} />;
     }
   };
 
@@ -249,7 +270,7 @@ function AppContent() {
                 <button
                   key={item.id}
                   onClick={() => {
-                    setCurrentScreen(item.id);
+                    navigateTo(item.id);
                     setSidebarOpen(false);
                   }}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-[15px] font-semibold transition-all outline-none border-l-4 ${

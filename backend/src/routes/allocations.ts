@@ -3,6 +3,7 @@ import { PrismaClient, Role, AssetStatus, AllocationStatus, TransferStatus, Noti
 import { z } from 'zod';
 import { authenticateJWT } from '../middleware/auth';
 import { requireRole } from '../middleware/requireRole';
+import { lockAssetForWorkflow } from '../services/assetWorkflow';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -67,8 +68,12 @@ router.post('/', authenticateJWT, requireRole([Role.ASSET_MANAGER]), async (req,
       return res.status(400).json({ error: 'Must allocate to exactly one Employee OR one Department' });
     }
 
-    // Run conflict check and creation in a transaction
+    // Lock the asset first so concurrent allocation attempts are serialized.
     const result = await prisma.$transaction(async (tx) => {
+      if (!await lockAssetForWorkflow(tx, body.assetId)) {
+        throw { status: 404, message: 'Asset not found' };
+      }
+
       // 1. Fetch asset details
       const asset = await tx.asset.findUnique({
         where: { id: body.assetId }
@@ -78,8 +83,8 @@ router.post('/', authenticateJWT, requireRole([Role.ASSET_MANAGER]), async (req,
         throw { status: 404, message: 'Asset not found' };
       }
 
-      if (asset.status === AssetStatus.LOST || asset.status === AssetStatus.RETIRED || asset.status === AssetStatus.DISPOSED) {
-        throw { status: 400, message: `Cannot allocate asset. Current status is ${asset.status}` };
+      if (asset.status !== AssetStatus.AVAILABLE) {
+        throw { status: 409, message: `Only available assets can be allocated. Current status is ${asset.status}` };
       }
 
       // 2. Check for active allocation conflicts
@@ -213,8 +218,22 @@ router.post('/:id/return', authenticateJWT, async (req, res) => {
       return res.status(403).json({ error: 'Forbidden: You do not have permission to return this asset allocation.' });
     }
 
-    // Process return in transaction
+    // Process return in a locked transaction.
     const returned = await prisma.$transaction(async (tx) => {
+      if (!await lockAssetForWorkflow(tx, allocation.assetId)) {
+        throw { status: 404, message: 'Asset not found' };
+      }
+
+      const currentAllocation = await tx.assetAllocation.findUnique({ where: { id } });
+      if (!currentAllocation || currentAllocation.status !== AllocationStatus.ACTIVE) {
+        throw { status: 409, message: 'Allocation was already returned or transferred' };
+      }
+
+      const currentAsset = await tx.asset.findUnique({ where: { id: allocation.assetId } });
+      if (!currentAsset) {
+        throw { status: 404, message: 'Asset not found' };
+      }
+
       const updatedAllocation = await tx.assetAllocation.update({
         where: { id },
         data: {
@@ -225,12 +244,14 @@ router.post('/:id/return', authenticateJWT, async (req, res) => {
         }
       });
 
-      // Update asset status to AVAILABLE
+      // A return must not take an approved repair out of maintenance.
       await tx.asset.update({
         where: { id: allocation.assetId },
         data: {
-          status: AssetStatus.AVAILABLE,
-          condition: body.conditionAtReturn || allocation.asset.condition
+          status: currentAsset.status === AssetStatus.UNDER_MAINTENANCE
+            ? AssetStatus.UNDER_MAINTENANCE
+            : AssetStatus.AVAILABLE,
+          condition: body.conditionAtReturn || currentAsset.condition
         }
       });
 
@@ -276,11 +297,22 @@ router.post('/transfers', authenticateJWT, async (req, res) => {
       where: {
         assetId: body.assetId,
         status: AllocationStatus.ACTIVE
-      }
+      },
+      include: { employee: { select: { departmentId: true } } }
     });
 
     if (!activeAllocation) {
       return res.status(400).json({ error: 'Cannot request transfer. The asset is not currently allocated.' });
+    }
+
+    const isManager = actor.role === Role.ADMIN || actor.role === Role.ASSET_MANAGER;
+    const isCurrentHolder = activeAllocation.employeeId === actor.id;
+    const isDepartmentHeadForHolder = actor.role === Role.DEPARTMENT_HEAD && actor.departmentId && (
+      activeAllocation.departmentId === actor.departmentId
+      || activeAllocation.employee?.departmentId === actor.departmentId
+    );
+    if (!isManager && !isCurrentHolder && !isDepartmentHeadForHolder) {
+      return res.status(403).json({ error: 'You can only request a transfer for an asset held by you or your department.' });
     }
 
     // Cannot transfer to yourself if you already hold it
@@ -435,8 +467,22 @@ router.patch('/transfers/:id/approve', authenticateJWT, async (req, res) => {
       return res.status(403).json({ error: 'Forbidden: You do not have permission to approve this transfer.' });
     }
 
-    // Approve transfer in a single transaction
+    // Lock the asset to prevent concurrent return, allocation, or approval changes.
     const result = await prisma.$transaction(async (tx) => {
+      if (!await lockAssetForWorkflow(tx, transfer.assetId)) {
+        throw { status: 404, message: 'Asset not found' };
+      }
+
+      const lockedTransfer = await tx.transferRequest.findUnique({ where: { id } });
+      if (!lockedTransfer || lockedTransfer.status !== TransferStatus.REQUESTED) {
+        throw { status: 409, message: 'Transfer request was already processed' };
+      }
+
+      const lockedAsset = await tx.asset.findUnique({ where: { id: transfer.assetId } });
+      if (!lockedAsset || lockedAsset.status !== AssetStatus.ALLOCATED) {
+        throw { status: 409, message: 'Only currently allocated assets can be transferred' };
+      }
+
       // 1. Mark old allocation returned / transferred
       if (transfer.fromAllocationId) {
         await tx.assetAllocation.update({

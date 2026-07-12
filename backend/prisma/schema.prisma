@@ -117,9 +117,22 @@ model Employee {
   auditItemsChecked   AuditItem[]          @relation("AuditItemCheckedBy")
   notifications       Notification[]
   activityLogs        ActivityLog[]
+  passwordResetTokens PasswordResetToken[]
 
   @@index([departmentId])
   @@index([role])
+}
+
+model PasswordResetToken {
+  id        Int      @id @default(autoincrement())
+  tokenHash String   @unique
+  employeeId Int
+  employee  Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([employeeId])
+  @@index([expiresAt])
 }
 
 model Department {

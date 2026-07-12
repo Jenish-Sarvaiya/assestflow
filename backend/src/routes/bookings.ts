@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { PrismaClient, BookingStatus, NotificationType, AssetStatus } from '@prisma/client';
 import { z } from 'zod';
 import { authenticateJWT } from '../middleware/auth';
+import { lockAssetForWorkflow } from '../services/assetWorkflow';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -76,6 +77,17 @@ router.post('/', authenticateJWT, async (req, res) => {
     const body = bookingSchema.parse(req.body);
     const actor = (req as any).user;
 
+    const requestedDepartmentId = body.departmentId || actor.departmentId || null;
+    const canBookForRequestedDepartment = !body.departmentId
+      || actor.role === 'ADMIN'
+      || actor.role === 'ASSET_MANAGER'
+      || (actor.role === 'DEPARTMENT_HEAD' && body.departmentId === actor.departmentId)
+      || (actor.role === 'EMPLOYEE' && body.departmentId === actor.departmentId);
+
+    if (!canBookForRequestedDepartment) {
+      return res.status(403).json({ error: 'You can only book resources for your own department.' });
+    }
+
     const now = new Date();
     if (body.startTime < now) {
       return res.status(400).json({ error: 'Booking start time must be in the future' });
@@ -85,6 +97,10 @@ router.post('/', authenticateJWT, async (req, res) => {
     }
 
     const result = await prisma.$transaction(async (tx) => {
+      if (!await lockAssetForWorkflow(tx, body.assetId)) {
+        throw { status: 404, message: 'Asset not found' };
+      }
+
       // 1. Verify asset is bookable
       const asset = await tx.asset.findUnique({
         where: { id: body.assetId }
@@ -98,9 +114,8 @@ router.post('/', authenticateJWT, async (req, res) => {
         throw { status: 400, message: 'Asset is not registered as a bookable shared resource' };
       }
 
-      // Block booking if asset is retired/lost/disposed
-      if (asset.status === AssetStatus.LOST || asset.status === AssetStatus.RETIRED || asset.status === AssetStatus.DISPOSED) {
-        throw { status: 400, message: `Cannot book asset. Current status is obsolete: ${asset.status}` };
+      if (asset.status !== AssetStatus.AVAILABLE) {
+        throw { status: 409, message: `Only available resources can be booked. Current status is ${asset.status}` };
       }
 
       // 2. Perform half-open interval overlap check
@@ -129,7 +144,7 @@ router.post('/', authenticateJWT, async (req, res) => {
         data: {
           assetId: body.assetId,
           bookedById: actor.id,
-          departmentId: body.departmentId || actor.departmentId || null,
+          departmentId: requestedDepartmentId,
           startTime: body.startTime,
           endTime: body.endTime,
           purpose: body.purpose || null,
@@ -284,6 +299,15 @@ router.patch('/:id/reschedule', authenticateJWT, async (req, res) => {
     }
 
     const rescheduled = await prisma.$transaction(async (tx) => {
+      if (!await lockAssetForWorkflow(tx, booking.assetId)) {
+        throw { status: 404, message: 'Asset not found' };
+      }
+
+      const currentBooking = await tx.resourceBooking.findUnique({ where: { id } });
+      if (!currentBooking || getDerivedBookingStatus(currentBooking) !== 'UPCOMING') {
+        throw { status: 409, message: 'Booking is no longer available to reschedule' };
+      }
+
       // Check for overlap, excluding this current booking
       const conflictingBooking = await tx.resourceBooking.findFirst({
         where: {

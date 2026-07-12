@@ -182,4 +182,44 @@ router.get('/bookings-heatmap', async (req, res) => {
   }
 });
 
+
+// GET /api/reports/asset-status-summary (Current lifecycle distribution)
+router.get('/asset-status-summary', async (_req, res) => {
+  try {
+    const summary = await prisma.asset.groupBy({
+      by: ['status'],
+      _count: { _all: true }
+    });
+
+    res.json(summary.map(item => ({ status: item.status, count: item._count._all })));
+  } catch (error) {
+    console.error('Fetch asset status summary error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/reports/allocations-by-department (Current equipment ownership mix)
+router.get('/allocations-by-department', async (_req, res) => {
+  try {
+    const allocations = await prisma.assetAllocation.findMany({
+      where: { status: AllocationStatus.ACTIVE },
+      include: {
+        department: { select: { name: true } },
+        employee: { include: { department: { select: { name: true } } } }
+      }
+    });
+
+    const totals = new Map<string, number>();
+    for (const allocation of allocations) {
+      const name = allocation.department?.name || allocation.employee?.department?.name || 'Unassigned';
+      totals.set(name, (totals.get(name) || 0) + 1);
+    }
+
+    res.json(Array.from(totals, ([department, count]) => ({ department, count })).sort((a, b) => b.count - a.count));
+  } catch (error) {
+    console.error('Fetch allocation summary error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 export default router;

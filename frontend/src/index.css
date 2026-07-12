@@ -272,3 +272,13 @@ button {
 ::-webkit-scrollbar-thumb:hover {
   background: #aebbc7;
 }
+
+/* Preserve a single bright action color across legacy module buttons. */
+.app-shell [class*='bg-gradient-to-r'] {
+  background-image: none !important;
+  background-color: var(--primary) !important;
+}
+
+.app-shell [class*='bg-gradient-to-r']:hover {
+  background-color: #e54b16 !important;
+}
