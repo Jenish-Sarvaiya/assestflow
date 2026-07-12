@@ -10,6 +10,7 @@ import assetRoutes from './routes/assets';
 import locationRoutes from './routes/locations';
 import allocationRoutes from './routes/allocations';
 import bookingRoutes from './routes/bookings';
+import maintenanceRoutes from './routes/maintenance';
 
 dotenv.config();
 
@@ -33,6 +34,7 @@ app.use('/api/assets', assetRoutes);
 app.use('/api/locations', locationRoutes);
 app.use('/api/allocations', allocationRoutes);
 app.use('/api/bookings', bookingRoutes);
+app.use('/api/maintenance-requests', maintenanceRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'AssetFlow API is running' });
