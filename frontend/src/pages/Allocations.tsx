@@ -16,7 +16,8 @@ import {
   ChevronRight,
   HelpCircle,
   X,
-  FileText
+  FileText,
+  RefreshCw
 } from 'lucide-react';
 
 interface Allocation {

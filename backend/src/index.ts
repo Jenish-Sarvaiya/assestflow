@@ -12,12 +12,19 @@ import allocationRoutes from './routes/allocations';
 import bookingRoutes from './routes/bookings';
 import maintenanceRoutes from './routes/maintenance';
 import auditRoutes from './routes/audits';
+import notificationRoutes from './routes/notifications';
+import dashboardRoutes from './routes/dashboard';
+import reportRoutes from './routes/reports';
+import { startCronJobs } from './jobs/overdue';
 
 dotenv.config();
 
 const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 4000;
+
+// Initialize background cron jobs
+startCronJobs();
 
 app.use(cors({
   origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
@@ -37,6 +44,9 @@ app.use('/api/allocations', allocationRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/maintenance-requests', maintenanceRoutes);
 app.use('/api', auditRoutes);
+app.use('/api', notificationRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/reports', reportRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'AssetFlow API is running' });

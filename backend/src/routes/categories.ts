@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { PrismaClient, Role } from '@prisma/client';
+import { PrismaClient, Role, Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { authenticateJWT } from '../middleware/auth';
 import { requireRole } from '../middleware/requireRole';
@@ -42,7 +42,7 @@ router.post('/', authenticateJWT, requireRole([Role.ADMIN]), async (req, res) =>
       data: {
         name: body.name,
         description: body.description || null,
-        customFieldsSchema: body.customFieldsSchema || null,
+        customFieldsSchema: body.customFieldsSchema ? (body.customFieldsSchema as Prisma.InputJsonValue) : Prisma.DbNull,
       }
     });
 
@@ -87,7 +87,9 @@ router.patch('/:id', authenticateJWT, requireRole([Role.ADMIN]), async (req, res
       data: {
         name: body.name,
         description: body.description !== undefined ? body.description : undefined,
-        customFieldsSchema: body.customFieldsSchema !== undefined ? body.customFieldsSchema : undefined,
+        customFieldsSchema: body.customFieldsSchema !== undefined 
+          ? (body.customFieldsSchema === null ? Prisma.DbNull : (body.customFieldsSchema as Prisma.InputJsonValue))
+          : undefined,
       }
     });
 

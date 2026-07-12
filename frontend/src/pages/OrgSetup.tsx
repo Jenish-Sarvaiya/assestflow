@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import { Employee } from '../store/auth';
+import type { Employee } from '../store/auth';
 import { Plus, Edit2, ShieldAlert, ArrowUpRight, Save, X, Building2, Users, Layers, Check, RefreshCw, PlusCircle, Trash2 } from 'lucide-react';
 
 interface Department {

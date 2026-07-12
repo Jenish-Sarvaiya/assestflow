@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from './store/auth';
 import { LoginSignup } from './pages/LoginSignup';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import { api } from './lib/api';
 
 // Import Screens
 import { Dashboard } from './pages/Dashboard';
@@ -46,6 +47,32 @@ function AppContent() {
   const { isAuthenticated, employee, isLoading, checkAuth, clearSession } = useAuthStore();
   const [currentScreen, setCurrentScreen] = useState<string>('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const queryClient = useQueryClient();
+
+  // Notifications Poll
+  const { data: notifications = [] } = useQuery<any[]>({
+    queryKey: ['notifications'],
+    queryFn: () => api.get('/notifications'),
+    refetchInterval: 10000,
+    enabled: isAuthenticated,
+  });
+
+  const markReadMutation = useMutation({
+    mutationFn: (id: number) => api.patch(`/notifications/${id}/read`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+    }
+  });
+
+  const dismissAllMutation = useMutation({
+    mutationFn: () => api.post('/notifications/dismiss-all'),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+    }
+  });
+
+  const unreadCount = notifications.filter((n: any) => !n.isRead).length;
 
   // Restore session
   useEffect(() => {
@@ -210,10 +237,68 @@ function AppContent() {
 
           {/* Quick Access panel (Notifications and profile overview) */}
           <div className="flex items-center space-x-4">
-            <button className="relative p-2 text-slate-400 hover:text-white transition outline-none cursor-pointer">
-              <Bell className="w-5 h-5" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-primary-500 animate-pulse"></span>
-            </button>
+            <div className="relative">
+              <button
+                onClick={() => setNotificationsOpen(!notificationsOpen)}
+                className="relative p-2 text-slate-400 hover:text-white transition outline-none cursor-pointer"
+              >
+                <Bell className="w-5 h-5" />
+                {unreadCount > 0 && (
+                  <span className="absolute top-1 right-1 px-1.5 py-0.5 text-[8px] font-bold text-white bg-red-500 rounded-full leading-none">
+                    {unreadCount}
+                  </span>
+                )}
+              </button>
+
+              {notificationsOpen && (
+                <div className="absolute right-0 mt-2 w-80 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl overflow-hidden z-50">
+                  <div className="p-3 bg-slate-950/80 border-b border-slate-800 flex justify-between items-center">
+                    <span className="text-xs font-bold text-white">Notifications</span>
+                    {unreadCount > 0 && (
+                      <button
+                        onClick={() => dismissAllMutation.mutate()}
+                        disabled={dismissAllMutation.isPending}
+                        className="text-[10px] text-primary-400 hover:text-primary-300 font-semibold cursor-pointer outline-none"
+                      >
+                        Dismiss All
+                      </button>
+                    )}
+                  </div>
+                  <div className="max-h-60 overflow-y-auto divide-y divide-slate-850">
+                    {notifications.length === 0 ? (
+                      <div className="p-6 text-center text-xs text-slate-500">
+                        No notifications to display.
+                      </div>
+                    ) : (
+                      notifications.map((n: any) => (
+                        <div
+                          key={n.id}
+                          className={`p-3 text-xs transition-colors flex justify-between items-start gap-2 ${
+                            n.isRead ? 'opacity-60 bg-slate-900' : 'bg-slate-850/40 hover:bg-slate-850'
+                          }`}
+                        >
+                          <div className="space-y-1 pr-2">
+                            <p className="text-slate-200 leading-snug">{n.message}</p>
+                            <span className="text-[9px] text-slate-550 block">
+                              {new Date(n.createdAt).toLocaleDateString()} {new Date(n.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          {!n.isRead && (
+                            <button
+                              onClick={() => markReadMutation.mutate(n.id)}
+                              disabled={markReadMutation.isPending}
+                              className="text-[9px] font-bold text-emerald-450 hover:underline cursor-pointer flex-shrink-0 outline-none"
+                            >
+                              Read
+                            </button>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
