@@ -4,34 +4,271 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  color-scheme: light;
+  --app-bg: #f3f6f8;
+  --panel: #ffffff;
+  --panel-soft: #f8fafc;
+  --border: #d8e0e7;
+  --border-strong: #c8d3dc;
+  --text: #07141d;
+  --muted: #5f6f7c;
+  --primary: #ff5a1f;
+  --teal: #0f8797;
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 14px 34px rgba(15, 23, 42, 0.06);
+}
+
+* {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
   font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  background-color: #0b0f19;
-  color: #f3f4f6;
+  background: var(--app-bg);
+  color: var(--text);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Glassmorphism utility classes */
-.glass {
-  background: rgba(17, 24, 39, 0.7);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+button,
+input,
+select,
+textarea {
+  font: inherit;
 }
 
-.glass-light {
-  background: rgba(255, 255, 255, 0.03);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+button {
+  letter-spacing: 0;
 }
 
+#root {
+  min-height: 100vh;
+}
+
+.app-shell,
+.auth-shell,
+.session-shell {
+  background: var(--app-bg);
+  color: var(--text);
+}
+
+.auth-shell {
+  background:
+    linear-gradient(130deg, rgba(255, 90, 31, 0.12), transparent 34%),
+    linear-gradient(230deg, rgba(15, 135, 151, 0.12), transparent 34%),
+    var(--app-bg);
+}
+
+.session-shell {
+  background: linear-gradient(135deg, rgba(255, 90, 31, 0.12), rgba(15, 135, 151, 0.1)), var(--app-bg);
+}
+
+.glass,
+.glass-light,
 .glass-card {
-  background: rgba(17, 24, 39, 0.6);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  background: var(--panel) !important;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid var(--border) !important;
+  border-radius: 0.5rem !important;
+  box-shadow: var(--shadow-card);
+}
+
+.app-shell [class*='rounded-2xl'],
+.app-shell [class*='rounded-3xl'],
+.auth-shell [class*='rounded-2xl'],
+.auth-shell [class*='rounded-3xl'] {
+  border-radius: 0.5rem !important;
+}
+
+.app-shell [class*='bg-slate-950'],
+.app-shell [class*='bg-slate-900'],
+.app-shell [class*='bg-slate-850'],
+.app-shell [class*='bg-slate-800'],
+.app-shell [class*='bg-slate-700'],
+.auth-shell [class*='bg-slate-950'],
+.auth-shell [class*='bg-slate-900'],
+.auth-shell [class*='bg-slate-850'],
+.auth-shell [class*='bg-slate-800'],
+.auth-shell [class*='bg-slate-700'] {
+  background-color: var(--panel-soft) !important;
+}
+
+.app-shell [class*='border-slate-900'],
+.app-shell [class*='border-slate-850'],
+.app-shell [class*='border-slate-800'],
+.app-shell [class*='border-slate-750'],
+.app-shell [class*='border-slate-700'],
+.auth-shell [class*='border-slate-900'],
+.auth-shell [class*='border-slate-850'],
+.auth-shell [class*='border-slate-800'],
+.auth-shell [class*='border-slate-750'],
+.auth-shell [class*='border-slate-700'] {
+  border-color: var(--border) !important;
+}
+
+.app-shell [class*='divide-slate-850'] > :not([hidden]) ~ :not([hidden]),
+.app-shell [class*='divide-slate-800'] > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--border) !important;
+}
+
+.app-shell .text-white,
+.auth-shell .text-white,
+.session-shell .text-white {
+  color: var(--text) !important;
+}
+
+.app-shell [class*='bg-gradient-to-r'].text-white,
+.app-shell .bg-red-650.text-white,
+.app-shell .bg-red-500.text-white,
+.app-shell .bg-emerald-500.text-white,
+.app-shell .bg-amber-500.text-white,
+.app-shell .bg-primary-500.text-white,
+.app-shell .bg-coral-500.text-white,
+.auth-shell [class*='bg-gradient-to-r'].text-white,
+.session-shell [class*='bg-gradient-to-r'].text-white {
+  color: #ffffff !important;
+}
+
+.app-shell .text-slate-200,
+.app-shell .text-slate-300,
+.app-shell .text-slate-350 {
+  color: #334155 !important;
+}
+
+.app-shell .text-slate-400,
+.app-shell .text-slate-450,
+.auth-shell .text-slate-400,
+.auth-shell .text-slate-450 {
+  color: #5f6f7c !important;
+}
+
+.app-shell .text-slate-500,
+.app-shell .text-slate-550,
+.auth-shell .text-slate-500,
+.auth-shell .text-slate-550 {
+  color: #7a8995 !important;
+}
+
+.app-shell .text-slate-650 {
+  color: #a2adb8 !important;
+}
+
+.app-shell .text-primary-300,
+.app-shell .text-primary-400,
+.app-shell .text-primary-500,
+.auth-shell .text-primary-300,
+.auth-shell .text-primary-400,
+.auth-shell .text-primary-500 {
+  color: #d84312 !important;
+}
+
+.app-shell .text-sky-400,
+.app-shell .text-blue-400 {
+  color: #0f8797 !important;
+}
+
+.app-shell .text-indigo-400,
+.app-shell .text-purple-400 {
+  color: #7048b8 !important;
+}
+
+.app-shell .text-emerald-400,
+.app-shell .text-emerald-450 {
+  color: #047857 !important;
+}
+
+.app-shell .text-amber-400,
+.app-shell .text-orange-400 {
+  color: #b45309 !important;
+}
+
+.app-shell .text-red-400 {
+  color: #dc2626 !important;
+}
+
+.app-shell input:not([type='checkbox']):not([type='radio']),
+.app-shell select,
+.app-shell textarea,
+.auth-shell input:not([type='checkbox']):not([type='radio']),
+.auth-shell select,
+.auth-shell textarea,
+.session-shell input:not([type='checkbox']):not([type='radio']),
+.session-shell select,
+.session-shell textarea {
+  background-color: #ffffff !important;
+  border-color: var(--border-strong) !important;
+  color: var(--text) !important;
+  box-shadow: none !important;
+}
+
+.app-shell input::placeholder,
+.auth-shell input::placeholder,
+.session-shell input::placeholder,
+.app-shell textarea::placeholder,
+.auth-shell textarea::placeholder,
+.session-shell textarea::placeholder {
+  color: #8a98a6 !important;
+}
+
+.app-shell input:focus,
+.app-shell select:focus,
+.app-shell textarea:focus,
+.auth-shell input:focus,
+.auth-shell select:focus,
+.auth-shell textarea:focus,
+.session-shell input:focus,
+.session-shell select:focus,
+.session-shell textarea:focus {
+  border-color: var(--primary) !important;
+  box-shadow: 0 0 0 3px rgba(255, 90, 31, 0.16) !important;
+}
+
+.app-shell table {
+  min-width: 760px;
+}
+
+.app-shell .glass:has(table),
+.app-shell .glass-card:has(table) {
+  overflow-x: auto !important;
+  overflow-y: hidden;
+}
+
+.app-shell thead {
+  background: #f8fafc !important;
+}
+
+.app-shell tbody tr:hover {
+  background-color: #fff4ed !important;
+}
+
+.app-shell [class*='fixed'][class*='bg-slate-950'],
+.app-shell [class*='fixed'][class*='bg-slate-900'] {
+  background-color: rgba(15, 23, 42, 0.32) !important;
+}
+
+.app-shell ::selection,
+.auth-shell ::selection,
+.session-shell ::selection {
+  background: rgba(255, 90, 31, 0.24);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #eef2f6;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c5d0d9;
+  border-radius: 999px;
+  border: 2px solid #eef2f6;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #aebbc7;
 }

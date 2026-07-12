@@ -10,8 +10,6 @@ import {
   Clock,
   UserCheck,
   Building,
-  TrendingUp,
-  AlertOctagon,
   Bell,
   ArrowRight,
   ShieldCheck,
@@ -27,19 +25,156 @@ interface DashboardData {
   recentActivity?: any[];
 }
 
+type MetricCard = {
+  label: string;
+  value: number;
+  detail: React.ReactNode;
+  icon: React.ElementType;
+  accent: string;
+  iconColor: string;
+};
+
+const formatRole = (role: string) => role.replace('_', ' ');
+
+const getRoleMessage = (role: string, departmentName?: string) => {
+  if (role === 'ADMIN') return 'System configurations, database audits, and security directory controls are ready.';
+  if (role === 'ASSET_MANAGER') return 'Lifecycle registers, allocation conflict routing, and maintenance orders are active.';
+  if (role === 'DEPARTMENT_HEAD') return `Reviewing resource pools and transfer queues for the ${departmentName || 'department'}.`;
+  return 'Request hardware allocations, book shared resources, and log maintenance tickets.';
+};
+
+const getMetricCards = (role: string, stats: any): MetricCard[] => {
+  if (role === 'ADMIN' || role === 'ASSET_MANAGER') {
+    return [
+      {
+        label: 'Total Active Assets',
+        value: stats.totalAssets || 0,
+        icon: Box,
+        accent: 'border-l-primary-500',
+        iconColor: 'text-primary-600',
+        detail: (
+          <span>
+            <strong className="text-emerald-700">{stats.availableAssets || 0}</strong> available · {stats.allocatedAssets || 0} allocated
+          </span>
+        ),
+      },
+      {
+        label: 'Active Allocations',
+        value: stats.activeAllocations || 0,
+        icon: Shuffle,
+        accent: 'border-l-blue-600',
+        iconColor: 'text-blue-600',
+        detail: <span>Direct user assigns</span>,
+      },
+      {
+        label: 'Pending Maintenance',
+        value: stats.pendingMaintenance || 0,
+        icon: Wrench,
+        accent: 'border-l-amber-500',
+        iconColor: 'text-amber-600',
+        detail: (
+          <span>
+            <strong className="text-red-600">{stats.lostAssets || 0}</strong> reported lost
+          </span>
+        ),
+      },
+      {
+        label: 'Ongoing Bookings',
+        value: stats.ongoingBookings || 0,
+        icon: CalendarDays,
+        accent: 'border-l-teal-600',
+        iconColor: 'text-teal-700',
+        detail: <span>Shared resources in use</span>,
+      },
+    ];
+  }
+
+  if (role === 'DEPARTMENT_HEAD') {
+    return [
+      {
+        label: 'Dept Equipment Pool',
+        value: stats.totalAssets || 0,
+        icon: Building,
+        accent: 'border-l-primary-500',
+        iconColor: 'text-primary-600',
+        detail: <span>Allocated to team/dept</span>,
+      },
+      {
+        label: 'Pending Transfers',
+        value: stats.pendingTransfers || 0,
+        icon: Shuffle,
+        accent: 'border-l-blue-600',
+        iconColor: 'text-blue-600',
+        detail: <span>Requires head authorization</span>,
+      },
+      {
+        label: 'Active Repair Orders',
+        value: stats.pendingMaintenance || 0,
+        icon: Wrench,
+        accent: 'border-l-amber-500',
+        iconColor: 'text-amber-600',
+        detail: <span>Flipped under maintenance</span>,
+      },
+      {
+        label: 'Dept Bookings Running',
+        value: stats.ongoingBookings || 0,
+        icon: CalendarDays,
+        accent: 'border-l-teal-600',
+        iconColor: 'text-teal-700',
+        detail: <span>Resource slots active</span>,
+      },
+    ];
+  }
+
+  return [
+    {
+      label: 'My Assigned Devices',
+      value: stats.myAllocations || 0,
+      icon: UserCheck,
+      accent: 'border-l-primary-500',
+      iconColor: 'text-primary-600',
+      detail: <span>Active allocations</span>,
+    },
+    {
+      label: 'My Active Reservations',
+      value: stats.myBookings || 0,
+      icon: CalendarDays,
+      accent: 'border-l-blue-600',
+      iconColor: 'text-blue-600',
+      detail: <span>Upcoming scheduled slots</span>,
+    },
+    {
+      label: 'My Service Tickets',
+      value: stats.myMaintenance || 0,
+      icon: Wrench,
+      accent: 'border-l-amber-500',
+      iconColor: 'text-amber-600',
+      detail: <span>Active repairs filed by you</span>,
+    },
+    {
+      label: 'Unread Alerts',
+      value: stats.unreadNotifications || 0,
+      icon: Bell,
+      accent: 'border-l-teal-600',
+      iconColor: 'text-teal-700',
+      detail: <span>Check header dropdown</span>,
+    },
+  ];
+};
+
 export const Dashboard: React.FC = () => {
   const { employee } = useAuthStore();
 
   const { data: dashboardData, isLoading } = useQuery<DashboardData>({
     queryKey: ['dashboard-stats'],
     queryFn: () => api.get('/dashboard/stats'),
-    refetchInterval: 20000, // Refresh stats every 20 seconds
+    refetchInterval: 20000,
   });
 
   if (isLoading || !dashboardData) {
     return (
-      <div className="flex justify-center items-center py-24 text-slate-400 text-sm space-x-2">
-        <RefreshCw className="w-6 h-6 animate-spin text-primary-400" />
+      <div className="flex justify-center items-center py-24 text-slate-500 text-sm gap-2">
+        <RefreshCw className="w-6 h-6 animate-spin text-primary-500" />
         <span>Loading stats dashboard...</span>
       </div>
     );
@@ -47,187 +182,71 @@ export const Dashboard: React.FC = () => {
 
   const { stats, categoryDistribution = [], recentActivity = [] } = dashboardData;
   const role = employee?.role || 'EMPLOYEE';
+  const metricCards = getMetricCards(role, stats);
+  const categoryTotal = categoryDistribution.reduce((acc, curr) => acc + curr.count, 0);
+  const barColors = ['bg-teal-600', 'bg-purple-500', 'bg-primary-500', 'bg-emerald-600', 'bg-amber-500'];
 
   return (
-    <div className="space-y-8 text-white">
-      {/* WELCOME BANNER */}
-      <div className="relative glass rounded-3xl p-6 md:p-8 overflow-hidden border border-slate-800/80 shadow-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-        <div className="absolute inset-0 bg-gradient-to-r from-sky-500/10 to-indigo-600/5 pointer-events-none"></div>
-        <div className="space-y-2 relative z-10">
-          <div className="flex items-center space-x-2 text-sky-400">
-            <ShieldCheck className="w-5 h-5" />
-            <span className="text-xs font-bold uppercase tracking-wider">Access Level: {role.replace('_', ' ')}</span>
+    <div className="space-y-6 text-slate-950">
+      <section className="bg-white border border-slate-200 rounded-lg p-5 sm:p-6 shadow-sm">
+        <div className="space-y-4">
+          <div className="flex items-center gap-3 text-teal-700">
+            <span className="w-2.5 h-2.5 rounded-full bg-teal-700"></span>
+            <span className="text-xs font-bold uppercase tracking-[0.34em]">Access Level: {formatRole(role)}</span>
           </div>
-          <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight">
-            Welcome back, {employee?.name}!
-          </h2>
-          <p className="text-slate-400 text-sm max-w-xl">
-            {role === 'ADMIN' && 'System configurations, database audits, and security directory controls are ready.'}
-            {role === 'ASSET_MANAGER' && 'Lifecycle registers, allocations conflict routing, and maintenance orders are active.'}
-            {role === 'DEPARTMENT_HEAD' && `Reviewing resource pools and transfer queues for the ${dashboardData.departmentName || 'department'}.`}
-            {role === 'EMPLOYEE' && 'Request hardware allocations, book shared resources, and log maintenance tickets.'}
-          </p>
+          <div className="space-y-3">
+            <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-950 leading-tight">
+              Welcome back, {employee?.name}!
+            </h2>
+            <p className="text-slate-600 text-sm sm:text-base max-w-3xl leading-relaxed">
+              {getRoleMessage(role, dashboardData.departmentName)}
+            </p>
+          </div>
         </div>
+      </section>
 
-        {/* Dynamic mini-widget */}
-        {role === 'EMPLOYEE' && (
-          <div className="glass bg-slate-950/40 p-4 rounded-2xl border border-slate-850/80 text-center min-w-[140px]">
-            <span className="text-[10px] uppercase font-bold text-slate-550 block">Unread Alerts</span>
-            <span className="text-3xl font-black text-amber-400 mt-1 block">
-              {stats.unreadNotifications || 0}
-            </span>
-          </div>
-        )}
-      </div>
-
-      {/* KPI METRIC CARDS */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-        {/* Render cards based on role */}
-        {(role === 'ADMIN' || role === 'ASSET_MANAGER') && (
-          <>
-            <div className="glass rounded-2xl p-5 border border-slate-800/80 hover:border-slate-700/80 transition shadow relative overflow-hidden group">
-              <Box className="w-5 h-5 text-sky-400 absolute right-5 top-5 opacity-60 group-hover:scale-110 transition-transform" />
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Total Active Assets</span>
-              <p className="text-3xl font-extrabold text-white mt-2">{stats.totalAssets || 0}</p>
-              <div className="mt-4 flex gap-3 text-[10px] text-slate-400 border-t border-slate-850 pt-3">
-                <span className="text-emerald-400 font-bold">{stats.availableAssets || 0} Available</span>
-                <span>{stats.allocatedAssets || 0} Allocated</span>
+      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {metricCards.map((card) => {
+          const Icon = card.icon;
+          return (
+            <div key={card.label} className={`bg-white border border-slate-200 border-l-4 ${card.accent} rounded-lg p-4 shadow-sm min-h-[148px] flex flex-col justify-between`}>
+              <div className="flex items-start justify-between gap-4">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 leading-relaxed">
+                  {card.label}
+                </span>
+                <Icon className={`w-5 h-5 ${card.iconColor}`} />
+              </div>
+              <div>
+                <p className="text-4xl font-extrabold text-slate-950 tracking-tight">{card.value}</p>
+                <div className="mt-3 pt-3 border-t border-slate-200 text-sm text-slate-500 leading-snug">
+                  {card.detail}
+                </div>
               </div>
             </div>
+          );
+        })}
+      </section>
 
-            <div className="glass rounded-2xl p-5 border border-slate-800/80 hover:border-slate-700/80 transition shadow relative overflow-hidden group">
-              <Shuffle className="w-5 h-5 text-primary-400 absolute right-5 top-5 opacity-60 group-hover:scale-110 transition-transform" />
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Active Allocations</span>
-              <p className="text-3xl font-extrabold text-white mt-2">{stats.activeAllocations || 0}</p>
-              <div className="mt-4 flex gap-3 text-[10px] text-slate-500 border-t border-slate-850 pt-3">
-                <span>Direct user assigns</span>
-              </div>
-            </div>
-
-            <div className="glass rounded-2xl p-5 border border-slate-800/80 hover:border-slate-700/80 transition shadow relative overflow-hidden group">
-              <Wrench className="w-5 h-5 text-amber-400 absolute right-5 top-5 opacity-60 group-hover:scale-110 transition-transform" />
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Pending Maintenance</span>
-              <p className="text-3xl font-extrabold text-white mt-2">{stats.pendingMaintenance || 0}</p>
-              <div className="mt-4 flex gap-3 text-[10px] text-slate-400 border-t border-slate-850 pt-3">
-                <span className="text-red-400 font-bold">{stats.lostAssets || 0} Reported Lost</span>
-              </div>
-            </div>
-
-            <div className="glass rounded-2xl p-5 border border-slate-800/80 hover:border-slate-700/80 transition shadow relative overflow-hidden group">
-              <CalendarDays className="w-5 h-5 text-indigo-400 absolute right-5 top-5 opacity-60 group-hover:scale-110 transition-transform" />
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Ongoing Bookings</span>
-              <p className="text-3xl font-extrabold text-white mt-2">{stats.ongoingBookings || 0}</p>
-              <div className="mt-4 flex gap-3 text-[10px] text-slate-500 border-t border-slate-850 pt-3">
-                <span>Shared resources in use</span>
-              </div>
-            </div>
-          </>
-        )}
-
-        {role === 'DEPARTMENT_HEAD' && (
-          <>
-            <div className="glass rounded-2xl p-5 border border-slate-800/80 hover:border-slate-700/80 transition shadow relative overflow-hidden group">
-              <Building className="w-5 h-5 text-sky-400 absolute right-5 top-5 opacity-60" />
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Dept Equipment Pool</span>
-              <p className="text-3xl font-extrabold text-white mt-2">{stats.totalAssets || 0}</p>
-              <div className="mt-4 flex gap-3 text-[10px] text-slate-500 border-t border-slate-850 pt-3">
-                <span>Allocated to team/dept</span>
-              </div>
-            </div>
-
-            <div className="glass rounded-2xl p-5 border border-slate-800/80 hover:border-slate-700/80 transition shadow relative overflow-hidden group">
-              <Shuffle className="w-5 h-5 text-primary-400 absolute right-5 top-5 opacity-60" />
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Pending Transfers</span>
-              <p className="text-3xl font-extrabold text-white mt-2">{stats.pendingTransfers || 0}</p>
-              <div className="mt-4 flex gap-3 text-[10px] text-slate-500 border-t border-slate-850 pt-3">
-                <span>Requires head authorization</span>
-              </div>
-            </div>
-
-            <div className="glass rounded-2xl p-5 border border-slate-800/80 hover:border-slate-700/80 transition shadow relative overflow-hidden group">
-              <Wrench className="w-5 h-5 text-amber-400 absolute right-5 top-5 opacity-60" />
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Active Repair Orders</span>
-              <p className="text-3xl font-extrabold text-white mt-2">{stats.pendingMaintenance || 0}</p>
-              <div className="mt-4 flex gap-3 text-[10px] text-slate-500 border-t border-slate-850 pt-3">
-                <span>Flipped under maintenance</span>
-              </div>
-            </div>
-
-            <div className="glass rounded-2xl p-5 border border-slate-800/80 hover:border-slate-700/80 transition shadow relative overflow-hidden group">
-              <CalendarDays className="w-5 h-5 text-indigo-400 absolute right-5 top-5 opacity-60" />
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Dept Bookings Running</span>
-              <p className="text-3xl font-extrabold text-white mt-2">{stats.ongoingBookings || 0}</p>
-              <div className="mt-4 flex gap-3 text-[10px] text-slate-500 border-t border-slate-850 pt-3">
-                <span>Resource slots active</span>
-              </div>
-            </div>
-          </>
-        )}
-
-        {role === 'EMPLOYEE' && (
-          <>
-            <div className="glass rounded-2xl p-5 border border-slate-800/80 hover:border-slate-700/80 transition shadow relative overflow-hidden group">
-              <UserCheck className="w-5 h-5 text-sky-400 absolute right-5 top-5 opacity-60" />
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">My Assigned Devices</span>
-              <p className="text-3xl font-extrabold text-white mt-2">{stats.myAllocations || 0}</p>
-              <div className="mt-4 flex gap-3 text-[10px] text-slate-500 border-t border-slate-850 pt-3">
-                <span>Active allocations</span>
-              </div>
-            </div>
-
-            <div className="glass rounded-2xl p-5 border border-slate-800/80 hover:border-slate-700/80 transition shadow relative overflow-hidden group">
-              <CalendarDays className="w-5 h-5 text-indigo-400 absolute right-5 top-5 opacity-60" />
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">My Active Reservations</span>
-              <p className="text-3xl font-extrabold text-white mt-2">{stats.myBookings || 0}</p>
-              <div className="mt-4 flex gap-3 text-[10px] text-slate-500 border-t border-slate-850 pt-3">
-                <span>Upcoming scheduled slots</span>
-              </div>
-            </div>
-
-            <div className="glass rounded-2xl p-5 border border-slate-800/80 hover:border-slate-700/80 transition shadow relative overflow-hidden group">
-              <Wrench className="w-5 h-5 text-amber-400 absolute right-5 top-5 opacity-60" />
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">My Service Tickets</span>
-              <p className="text-3xl font-extrabold text-white mt-2">{stats.myMaintenance || 0}</p>
-              <div className="mt-4 flex gap-3 text-[10px] text-slate-500 border-t border-slate-850 pt-3">
-                <span>Active repairs filed by you</span>
-              </div>
-            </div>
-
-            <div className="glass rounded-2xl p-5 border border-slate-800/80 hover:border-slate-700/80 transition shadow relative overflow-hidden group">
-              <Bell className="w-5 h-5 text-primary-400 absolute right-5 top-5 opacity-60" />
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Unread Alerts</span>
-              <p className="text-3xl font-extrabold text-white mt-2">{stats.unreadNotifications || 0}</p>
-              <div className="mt-4 flex gap-3 text-[10px] text-slate-500 border-t border-slate-850 pt-3">
-                <span>Check header dropdown</span>
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* GRAPHICAL CATEGORY CHART PANEL (Admins/Managers) */}
+      <section className="grid grid-cols-1 lg:grid-cols-5 gap-5">
         {(role === 'ADMIN' || role === 'ASSET_MANAGER') && categoryDistribution.length > 0 ? (
-          <div className="lg:col-span-1 glass rounded-2xl p-6 border border-slate-800/80 space-y-6">
-            <div className="flex items-center space-x-2">
-              <FolderTree className="w-5 h-5 text-primary-400" />
-              <h3 className="font-bold text-white text-base">Category Distributions</h3>
+          <div className="lg:col-span-2 bg-white border border-slate-200 rounded-lg p-5 shadow-sm space-y-5">
+            <div className="flex items-center gap-3">
+              <FolderTree className="w-5 h-5 text-teal-700" />
+              <h3 className="font-extrabold text-slate-950 text-xl leading-tight">Category distributions</h3>
             </div>
-            
+
             <div className="space-y-4">
               {categoryDistribution.map((cat, idx) => {
-                const total = categoryDistribution.reduce((acc, curr) => acc + curr.count, 0);
-                const percent = total > 0 ? Math.round((cat.count / total) * 100) : 0;
+                const percent = categoryTotal > 0 ? Math.round((cat.count / categoryTotal) * 100) : 0;
                 return (
-                  <div key={idx} className="space-y-1.5">
-                    <div className="flex justify-between text-xs font-semibold">
-                      <span className="text-slate-300">{cat.name}</span>
-                      <span className="text-slate-400">{cat.count} units ({percent}%)</span>
+                  <div key={cat.name} className="space-y-2">
+                    <div className="flex justify-between gap-4 text-sm font-semibold">
+                      <span className="text-slate-950">{cat.name}</span>
+                      <span className="text-slate-500 font-mono">{cat.count} units · {percent}%</span>
                     </div>
-                    {/* CUSTOM CSS GAUGE BAR */}
-                    <div className="w-full h-2 bg-slate-950 rounded-full overflow-hidden border border-slate-900">
+                    <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-gradient-to-r from-sky-400 to-indigo-500 rounded-full transition-all duration-500"
+                        className={`h-full ${barColors[idx % barColors.length]} rounded-full transition-all duration-500`}
                         style={{ width: `${percent}%` }}
                       ></div>
                     </div>
@@ -237,42 +256,41 @@ export const Dashboard: React.FC = () => {
             </div>
           </div>
         ) : (
-          <div className="lg:col-span-1 glass rounded-2xl p-6 border border-slate-800/80 text-center text-slate-450 text-xs py-12">
+          <div className="lg:col-span-2 bg-white border border-slate-200 rounded-lg p-10 shadow-sm text-center text-slate-500 text-sm">
             No categorization distributions found. Put categories and assets to generate stock charts.
           </div>
         )}
 
-        {/* RECENT ACTIVITY TICKER (Admins/Managers only) */}
         {(role === 'ADMIN' || role === 'ASSET_MANAGER') ? (
-          <div className="lg:col-span-2 glass rounded-2xl p-6 border border-slate-800/80 space-y-4">
-            <div className="flex items-center space-x-2">
-              <Clock className="w-5 h-5 text-primary-400" />
-              <h3 className="font-bold text-white text-base">Recent Audited Actions</h3>
+          <div className="lg:col-span-3 bg-white border border-slate-200 rounded-lg p-5 shadow-sm space-y-5">
+            <div className="flex items-center gap-3">
+              <Clock className="w-5 h-5 text-teal-700" />
+              <h3 className="font-extrabold text-slate-950 text-xl">Recent audited actions</h3>
             </div>
-            
+
             {recentActivity.length === 0 ? (
-              <div className="text-center py-12 text-slate-500 text-xs italic">
+              <div className="text-center py-12 text-slate-500 text-sm italic">
                 No audited log events recorded.
               </div>
             ) : (
-              <div className="divide-y divide-slate-850">
-                {recentActivity.map((log, index) => (
-                  <div key={log.id} className="py-3 first:pt-0 last:pb-0 flex justify-between items-start gap-4 text-xs">
-                    <div className="space-y-1 pr-2">
-                      <div className="flex items-center space-x-1.5">
-                        <span className="font-bold text-sky-400 text-[10px] px-1.5 py-0.5 bg-slate-900 border border-slate-800 rounded">
+              <div className="divide-y divide-slate-200">
+                {recentActivity.map((log) => (
+                  <div key={log.id} className="py-3 first:pt-0 last:pb-0 flex justify-between items-start gap-5 text-sm">
+                    <div className="space-y-2 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-mono font-bold text-teal-800 text-[11px] px-2.5 py-1 bg-teal-50 border border-teal-100 rounded-md uppercase tracking-wider">
                           {log.action.replace('_', ' ')}
                         </span>
-                        <span className="text-slate-450 text-[10px]">
-                          by {log.actor.name}
+                        <span className="text-slate-500">
+                          by {log.actor?.name || 'System'}
                         </span>
                       </div>
-                      <p className="text-slate-300 leading-snug">
+                      <p className="text-slate-700 leading-snug">
                         Modified {log.entityType}
                         {log.metadata?.tag ? ` (${log.metadata.tag})` : ''}
                       </p>
                     </div>
-                    <span className="text-[9px] text-slate-550 flex-shrink-0">
+                    <span className="text-xs text-slate-500 font-mono flex-shrink-0 pt-1">
                       {new Date(log.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
                   </div>
@@ -281,31 +299,30 @@ export const Dashboard: React.FC = () => {
             )}
           </div>
         ) : (
-          /* QUICK OPTIONS CONSOLE FOR EMPLOYEES */
-          <div className="lg:col-span-2 glass rounded-2xl p-6 border border-slate-800/80 space-y-4">
-            <h3 className="font-bold text-white text-base">Quick Access Options</h3>
-            <p className="text-slate-450 text-xs">Quick shortcuts to request transfers, book equipment, or report defects.</p>
-            
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-              <div className="p-4 bg-slate-950/60 hover:bg-slate-950/90 rounded-xl border border-slate-850 hover:border-slate-800 transition cursor-pointer flex justify-between items-center group">
-                <div className="space-y-0.5">
-                  <span className="font-bold text-white text-xs block">Book Room / Projector</span>
-                  <span className="text-[10px] text-slate-500 block">Reserve shared spaces</span>
-                </div>
-                <ArrowRight className="w-4 h-4 text-slate-600 group-hover:text-primary-400 group-hover:translate-x-1 transition-all" />
-              </div>
+          <div className="lg:col-span-3 bg-white border border-slate-200 rounded-lg p-5 shadow-sm space-y-4">
+            <h3 className="font-extrabold text-slate-950 text-xl">Quick access options</h3>
+            <p className="text-slate-500 text-sm">Quick shortcuts to request transfers, book equipment, or report defects.</p>
 
-              <div className="p-4 bg-slate-950/60 hover:bg-slate-950/90 rounded-xl border border-slate-850 hover:border-slate-800 transition cursor-pointer flex justify-between items-center group">
-                <div className="space-y-0.5">
-                  <span className="font-bold text-white text-xs block">Report Damage</span>
-                  <span className="text-[10px] text-slate-500 block">File repair service request</span>
-                </div>
-                <ArrowRight className="w-4 h-4 text-slate-600 group-hover:text-amber-400 group-hover:translate-x-1 transition-all" />
-              </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              <button className="p-4 bg-slate-50 hover:bg-primary-50 rounded-lg border border-slate-200 hover:border-primary-200 transition cursor-pointer flex justify-between items-center group text-left">
+                <span>
+                  <span className="font-bold text-slate-950 text-sm block">Book Room / Projector</span>
+                  <span className="text-xs text-slate-500 block mt-1">Reserve shared spaces</span>
+                </span>
+                <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-primary-600 group-hover:translate-x-1 transition-all" />
+              </button>
+
+              <button className="p-4 bg-slate-50 hover:bg-primary-50 rounded-lg border border-slate-200 hover:border-primary-200 transition cursor-pointer flex justify-between items-center group text-left">
+                <span>
+                  <span className="font-bold text-slate-950 text-sm block">Report Damage</span>
+                  <span className="text-xs text-slate-500 block mt-1">File repair service request</span>
+                </span>
+                <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-primary-600 group-hover:translate-x-1 transition-all" />
+              </button>
             </div>
           </div>
         )}
-      </div>
+      </section>
     </div>
   );
 };
