@@ -6,6 +6,8 @@ import authRoutes from './routes/auth';
 import departmentRoutes from './routes/departments';
 import categoryRoutes from './routes/categories';
 import employeeRoutes from './routes/employees';
+import assetRoutes from './routes/assets';
+import locationRoutes from './routes/locations';
 
 dotenv.config();
 
@@ -25,6 +27,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/departments', departmentRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/employees', employeeRoutes);
+app.use('/api/assets', assetRoutes);
+app.use('/api/locations', locationRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'AssetFlow API is running' });
